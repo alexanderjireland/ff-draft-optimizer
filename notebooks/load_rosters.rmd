@@ -1,0 +1,36 @@
+---
+output: reprex::reprex_document
+knit: reprex::reprex_render
+---
+
+Describe your issue very briefly here. Then show it with a minimal, self-contained example in the following R chunk.
+
+```{r}
+#install.packages("nflfastR")
+library(nflfastR)
+library(tidyverse)
+library(nflreadr)
+```
+
+```{r}
+
+
+load_rosters(
+  seasons = most_recent_season(roster = TRUE),
+  file_type = getOption("nflreadr.prefer", default = "rds")
+)
+
+
+```
+
+```{r}
+
+roster <- try({# to avoid CRAN test problems
+fast_scraper_roster(1999:2024)
+})
+
+write.csv(roster, "../data/raw/rosters.csv", row.names=False)
+
+#ja <- roster %>% filter(gsis_id == '00-0034857')
+#ja
+```
