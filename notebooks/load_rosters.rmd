@@ -12,25 +12,55 @@ library(tidyverse)
 library(nflreadr)
 ```
 
+
 ```{r}
 
-
-load_rosters(
-  seasons = most_recent_season(roster = TRUE),
-  file_type = getOption("nflreadr.prefer", default = "rds")
+roster <- load_rosters(
+  seasons = 1999:2024
 )
 
+write.csv(roster, "../data/raw/roster.csv")
 
 ```
 
 ```{r}
 
-roster <- try({# to avoid CRAN test problems
-fast_scraper_roster(1999:2024)
-})
+injuries <- load_injuries(
+  seasons = 2009:2024
+)
 
-write.csv(roster, "../data/raw/rosters.csv", row.names=False)
+write.csv(injuries, "../data/raw/injuries.csv")
 
-#ja <- roster %>% filter(gsis_id == '00-0034857')
-#ja
 ```
+
+```{r}
+
+next_gen_passing <- load_nextgen_stats(stat_type = "passing")
+next_gen_receiving <- load_nextgen_stats(stat_type = "receiving")
+next_gen_rushing <- load_nextgen_stats(stat_type = "rushing")
+
+write.csv(next_gen_passing, '../data/raw/next_gen_passing.csv')
+write.csv(next_gen_receiving, '../data/raw/next_gen_receiving.csv')
+write.csv(next_gen_rushing, '../data/raw/next_gen_rushing.csv')
+
+
+```
+
+```{r}
+depth <- load_depth_charts(2001:2024)
+
+write.csv(depth, '../data/raw/depth_charts.csv')
+```
+
+```{r}
+pfr_adv <- load_pfr_advstats(2018:2024)
+
+write.csv(pfr_adv, '../data/raw/pfr_adv.csv')
+```
+
+```{r}
+trades <- load_trades(seasons = TRUE)
+
+write.csv(trades, '../data/raw/trades.csv')
+```
+
