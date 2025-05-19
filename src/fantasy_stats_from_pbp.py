@@ -20,6 +20,8 @@ def create_player_stats(player_id, pbp):
     Returns:
         pd.DataFrame: A DataFrame of the player's season totals with relevant offensive stats.
     """
+    # Create two point binary column
+    pbp['two_pt'] = np.where((pbp['two_point_conv_result']=='success'), 1, 0)
     # Can probably break this down to group by player_id instead of calculating individually for each player down the road
     passer = pbp[pbp['passer_player_id']==player_id][['passer_player_id', 'play_id', 'drive', 'game_id', 'week', 'season', 'passing_yards', 'pass_touchdown', 'interception', 'sack', 'two_pt']].rename(columns={'two_pt':'two_pt_pass'})
     rusher = pbp[pbp['rusher_player_id']==player_id][['rusher_player_id', 'play_id', 'drive', 'game_id', 'week', 'season', 'rush_touchdown', 'rushing_yards', 'two_pt']].rename(columns={'two_pt':'two_pt_rush'})
@@ -69,7 +71,8 @@ def create_player_stats(player_id, pbp):
     player_season['reception'] = player_filtered.groupby('season')['receiving_yards'].count()
     player_season[cols_to_sum] = player_filtered.groupby('season')[cols_to_sum].sum()
     player_season['id'] = player_id
-
+    player_season = player_season[['id'] + [col for col in player_season.columns if col != 'id']]
+    
     return player_season
 
 def calculate_espn_ppr_score(row, ppr=True):
