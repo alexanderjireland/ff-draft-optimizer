@@ -1,0 +1,7 @@
+ff-optimizer_quick_notes
+
+Add .gitignore?
+
+Outline what EDA you want to do
+
+Figure out how to approach all seasonal data
