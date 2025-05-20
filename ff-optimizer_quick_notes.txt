@@ -1,7 +1,10 @@
 ff-optimizer_quick_notes
 
-Add .gitignore?
+Work on completing EDA
+	-More pretty graphs
 
-Outline what EDA you want to do
+Determine how to approach feature engineering for expected fantasy points model
+	-Merge needed dfs in
+	-Clean data (may need to use bfill, ffill, etc.)
 
-Figure out how to approach all seasonal data
+Get to do list going!
