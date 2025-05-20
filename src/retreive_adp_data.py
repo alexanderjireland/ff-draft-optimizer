@@ -285,8 +285,9 @@ def merge_adp_all_players(adp_data, all_players, drop_extra_cols=True):
     final_merged = final_merged[['id']+[col for col in final_merged.columns if col != 'id']]
 
     # Add a few rank-based columns to df
-    final_merged['season_end_rank'] = final_merged.groupby(['position', 'season'])['fantasy_pts'].rank(method='dense', ascending=False).astype(int)
-    final_merged['season_end_rank_diff'] = final_merged['season_end_rank'] - final_merged['Rank']
-    final_merged['ESPN_season_end_rank_diff'] = final_merged['season_end_rank'] - final_merged['ESPN']
+    final_merged['position_season_end_rank'] = final_merged.groupby(['position', 'season'])['fantasy_pts'].rank(method='dense', ascending=False).astype(int)
+    final_merged['season_end_rank'] = final_merged.groupby(['season'])['fantasy_pts'].rank(method='dense', ascending=False).astype(int)
+    final_merged['position_season_end_rank_diff'] = final_merged['position_season_end_rank'] - final_merged['position_rank']
+    final_merged['season_end_rank_diff'] = final_merged['season_end_rank'] - final_merged['AVG']
 
     return final_merged

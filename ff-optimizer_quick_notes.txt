@@ -8,3 +8,5 @@ Determine how to approach feature engineering for expected fantasy points model
 	-Clean data (may need to use bfill, ffill, etc.)
 
 Get to do list going!
+
+Add .pkl file data collection nb from midcourse project to this repository?
