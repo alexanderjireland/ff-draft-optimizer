@@ -52,13 +52,12 @@ def parse_player_info(info):
 
     # Specify what suffixes to catch in name
     suffixes = {'Jr.', 'Sr.', 'Jr', 'Sr', 'II', 'III', 'IV', 'V', 'VI', 'VII'}
-    if parts and re.fullmatch(r'[A-Z]{2,3}', parts[-1]) and parts[-1] not in suffixes:
+    if len(parts) >= 2 and parts[-1] not in suffixes and re.fullmatch(r'[A-Z]{2,3}', parts[-1]):
         team = parts[-1]
         name_parts = parts[:-1]
     else:
         team = None
         name_parts = parts
-
     name = ' '.join(name_parts)
 
     return [name or None, team, bye]
@@ -223,23 +222,20 @@ def fuzzy_match_names_by_group(df1, df2,
         forbidden_pairs = get_default_forbidden_pairs()
 
     matches = []
-    grouped_df1 = df1.groupby([season_col, team_col])
+    grouped_df1 = df1.groupby(season_col)
 
     # Get the best candidates to name match based on season and position
-    for (season, team), group1 in grouped_df1: # Found adding team not helpful, team abbreviations not standard accross dfs, so can ignore for now
+    for season, group1 in grouped_df1: # Found adding team not helpful, team abbreviations not standard accross dfs, so can ignore for now
         for _, row in group1.iterrows():
             name = row[name_col_df1]
             position = row.get(position_col, None)
 
             # Get candidates
             candidates = get_candidates(df2, season, position, name_col_df2, season_col, position_col)
-
             # Find best match(es) and score(s)
             match, score = find_best_match(name, candidates, forbidden_pairs, threshold)
-
             # Create match df to help facilitate merge later
             matches.append({
-                'team': team,
                 'position': position,
                 'season': season,
                 'original': name,
@@ -274,9 +270,9 @@ def merge_adp_all_players(adp_data, all_players, drop_extra_cols=True):
     matched_df_clean['matched_key'] = matched_df_clean['matched'].str.lower()
 
     # Merge matched_df_cleaned with all_players and adp_data
-    all_players_merged = matched_df_clean.merge(all_players, left_on=['original_key', 'team', 'position', 'season'], right_on=['merge_key', 'team', 'position', 'season'], suffixes=('', '_all_players'), how='right')
-    final_merged = all_players_merged.merge(adp_data, left_on=['position', 'matched_key', 'full_name', 'season'], right_on=['position', 'merge_key', 'full_name', 'season'], suffixes=('_all_players', '_adp_data'), how='left')
-
+    all_players_merged = matched_df_clean.merge(all_players, left_on=['original_key', 'position', 'season'], right_on=['merge_key', 'position', 'season'], suffixes=('', '_all_players'), how='right')
+    final_merged = all_players_merged.merge(adp_data, left_on=['position', 'matched_key', 'season'], right_on=['position', 'merge_key', 'season'], suffixes=('_all_players', '_adp_data'), how='left')
+    
     # Extra columns to drop (optionally)
     if drop_extra_cols:
         final_merged = final_merged.drop(columns=['team_adp_data', 'merge_key_adp_data', 'Sleeper', 'NFL', 'RTSports', 'FFC', 'original', 'matched', 'score', 'original_key', 'matched_key', 'merge_key_all_players', 'Player Team (Bye)', 'POS', 'depth_chart_position'])
@@ -289,5 +285,5 @@ def merge_adp_all_players(adp_data, all_players, drop_extra_cols=True):
     final_merged['season_end_rank'] = final_merged.groupby(['season'])['fantasy_pts'].rank(method='dense', ascending=False).astype(int)
     final_merged['position_season_end_rank_diff'] = final_merged['position_season_end_rank'] - final_merged['position_rank']
     final_merged['season_end_rank_diff'] = final_merged['season_end_rank'] - final_merged['AVG']
-
+    
     return final_merged
