@@ -1,12 +1,11 @@
 ff-optimizer_quick_notes
 
-Work on completing EDA
-	-More pretty graphs
-
-Determine how to approach feature engineering for expected fantasy points model
-	-Merge needed dfs in
-	-Clean data (may need to use bfill, ffill, etc.)
-
 Get to do list going!
 
 Add .pkl file data collection nb from midcourse project to this repository?
+
+Finish ff_projections .py file, apply to Colab notebook and run
+
+Obtain player projections data
+
+Begin MARL work (systematically!)
