@@ -4,8 +4,11 @@ Get to do list going!
 
 Add .pkl file data collection nb from midcourse project to this repository?
 
-Finish ff_projections .py file, apply to Colab notebook and run
-
-Obtain player projections data
+Could incorporate probability a player gets injured into Bayesian regression model. (Hurdle model??)
 
 Begin MARL work (systematically!)
+
+Start with:
+- Two player draft environment
+- Player position, exp. rank, exp. ff pts?
+- Keep it simple!
