@@ -83,31 +83,36 @@ class CustomEnvironment(AECEnv):
             self._was_dead_step(action)
             return
         
+        player = None
+        valid_pick = False
+
         # Ensure the action is a valid integer within the range of available players
         if 0 <= action < len(self.player_pool):
-            # Selected player to draft
             player = self.player_pool[action]
             if player in self.available_players:
-                self.team_rosters[agent].append(player)
-                self.available_players.remove(player)
-                self.draft_history.append((agent, player))
-                self.rewards[agent] = 1
-            else:
-                self.rewards[agent] = -1
+                valid_pick = True
+
+        if valid_pick:
+            self.team_rosters[agent].append(player)
+            self.available_players.remove(player)
+            self.draft_history.append((agent, player))
+            self.rewards[agent] = 1
+
+            # Update rewards
+            self._cumulative_rewards[agent] += self.rewards[agent]
+
+            # Advance the draft to next pick
+            self.current_pick += 1
+
+            if self.current_pick >= self.total_picks:
+                for agent in self.agents:
+                    self.terminations[agent] = True
+            # Move to the next agent in the draft order
+            self.agent_selection = self.current_agent()
+
         else:
-            self.rewards[agent] = -1
-
-        # Update rewards
-        self._cumulative_rewards[agent] += self.rewards[agent]
-
-        # Advance the draft to next pick
-        self.current_pick += 1
-
-        if self.current_pick >= self.total_picks:
-            for agent in self.agents:
-                self.terminations[agent] = True
-
-        self.agent_selection = self.current_agent()
+            self.rewards[agent] = 0 # or -1 if we want to penalize invalid picks
+            print(f"[Invalid Pick] {agent} attempted invalid selection (action={action}). Needs to retry.")
 
     def render(self):
         round_num = self.current_pick // self.num_teams + (1 if self.current_pick % self.num_teams != 0 else 0)
@@ -125,9 +130,7 @@ class CustomEnvironment(AECEnv):
     def current_agent(self):
         if self.current_pick >= self.total_picks:
             return None
-        round_num = self.current_pick // self.num_teams + 1
-        pick_index = self.current_pick % self.num_teams
-        agent_index = self.draft_order[round_num][pick_index]
+        agent_index = self.draft_order[self.current_pick]
         return self.possible_agents[agent_index]
 
     def _generate_all_players(self):
@@ -145,41 +148,44 @@ class CustomEnvironment(AECEnv):
         return self.available_players
     
     def _get_draft_order(self):
-        draft_order = {}
+        draft_order = []
         if self.snake_draft:
             for round in range(1, self.max_rounds+1):
                 if self.snake_draft and round % 2 == 0:
-                    draft_order[round] = list(reversed(range(self.num_teams)))
+                    round_order = list(reversed(range(self.num_teams)))
                 else:
-                    draft_order[round] = list(range(self.num_teams))
-        else:
-            for round in range(1, self.max_rounds+1):
-                draft_order[round] = list(range(self.num_teams))
+                    round_order = list(range(self.num_teams))
+                draft_order.extend(round_order)
         return draft_order
 
     def _player_vector(self, players):
         vec = [1 if p in players else 0 for p in self.player_pool]
         return vec
 
+# Limit number of position players
 
-players = pd.DataFrame({"player_name": [f"Player {i}" for i in range(20)]})
+players = pd.read_csv("data/player_projections/model_06_12_predictions.csv")
+players_2023 = players[players['season'] == 2023]
 
-env = CustomEnvironment(players, num_teams=2, draft_type='not snake', rounds=5)
+env = CustomEnvironment(players_2023, num_teams=12, draft_type='snake', rounds=14)
 env.reset()
 
-while env.agents:
+while env.agent_selection is not None:
+    print(f"\nCurrent Agent: {env.agent_selection}")
     agent = env.agent_selection
-    if agent is None:
-        break
 
     for i, player in enumerate(env.player_pool): # Super basic policy, just select next player
         if player in env.available_players:
+            print(f"\nAgent {agent} picking at pick #{env.current_pick + 1}")
             action = i
             break
 
     env.step(action)
 
     env.render()
+
+    if env.current_pick >= env.total_picks:
+        break
 
 print("\n=== Final Team Rosters ===")
 for agent in env.possible_agents:

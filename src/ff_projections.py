@@ -351,6 +351,8 @@ def create_probabilistic_predictions(trace, pm_test, X_test, save_to_csv=False, 
     all_probabilities = np.array(all_probabilities)
     # Create a DataFrame with the predictions and credible intervals
     predictions_df = pd.DataFrame({
+        'season': pm_test['season'].values,
+        'gsis_id': pm_test['gsis_id'].values,
         'player_name': pm_test['full_name_all_players'].values,
         'median_prediction': median_predictions,
         'credible_interval_95_lower': [ci[0] for ci in credible_intervals_95],
