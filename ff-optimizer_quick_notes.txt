@@ -12,3 +12,13 @@ Start with:
 - Two player draft environment
 - Player position, exp. rank, exp. ff pts?
 - Keep it simple!
+
+Questions:
+- How to reward policy?
+- Should we reward within draft?
+	- Random pt from pt distribution
+	- Actual outcome
+- Reward based on rank?
+	-Actual optimized season score
+- Reward scaled optimized season score
+- PPO? DQN? Lots to learn!
