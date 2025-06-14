@@ -153,12 +153,15 @@ class CustomEnvironment(AECEnv):
             if self.current_pick >= self.total_picks:
                 for agent in self.agents:
                     self.terminations[agent] = True
+                    self.rewards[agent] = self._evaluate_team(agent)
             # Move to the next agent in the draft order
             self.agent_selection = self.current_agent()
 
         else:
             self.rewards[agent] = 0 # or -1 if we want to penalize invalid picks
             print(f"[Invalid Pick] {agent} attempted invalid selection (action={action}). Needs to retry.")
+
+
 
     def render(self):
         round_num = self.current_pick // self.num_teams + (1 if self.current_pick % self.num_teams != 0 else 0)
@@ -210,7 +213,10 @@ class CustomEnvironment(AECEnv):
         vec = [1 if p in players else 0 for p in self.player_pool]
         return vec
     
-
+    def _evaluate_team(self, agent):
+        # Placeholder for team evaluation logic
+        # For now, we return a random score
+        return np.random.rand()
 
 
 
@@ -252,6 +258,7 @@ while env.agent_selection is not None:
 print("\n=== Final Team Rosters ===")
 for agent in env.possible_agents:
     print(f"{agent}: {env.team_positions_roster[agent]}")
+    print(f"{agent} score: {env.rewards[agent]}")
 
             
 
