@@ -116,11 +116,12 @@ class CustomEnvironment(AECEnv):
         # Ensure the action is a valid integer within the range of available players
         if 0 <= action < len(self.player_pool):
             player = self.player_pool[action]
-            valid_pick = self._draft_player(agent, player)
+            valid_pick = self._draft_player(player)
 
         if valid_pick:
             # Advance the draft to next pick
             self.current_pick += 1
+            self.rewards[agent] += self._get_draft_pick_reward(agent, player)
 
             if self.current_pick >= self.total_picks:
                 self.full_roster_df = self._get_full_roster_df()
@@ -237,6 +238,13 @@ class CustomEnvironment(AECEnv):
     def _get_optimized_score(self, df):
         lineup = self._get_optimized_lineup(df)
         return lineup['fantasy_pts'].sum()
+    
+    def _get_draft_pick_reward(self, player, beta=0.1, gamma=1.0):
+        # Get draft pick reward based on combination of the player's projected and actual fantasy points
+        actual_pts = self.player_df.loc[self.player_df['gsis_id'] == player, 'fantasy_pts'].values[0]
+        projected_pts = self.player_df.loc[self.player_df['gsis_id'] == player, 'fantasy_pts'].values[0]
+        reward = projected_pts + beta * (actual_pts - projected_pts) # beta = 1 for actual pts, 0 for projected pts
+        return gamma * reward
     
     def _get_named_team_positions_roster(self):
         return {
