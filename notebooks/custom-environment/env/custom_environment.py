@@ -11,7 +11,7 @@ class CustomEnvironment(AECEnv):
     }
 
     def __init__(self, player_df:pd.DataFrame, num_teams=2, draft_type=None, rounds=14):
-        # Need to add rules about restrictions on positions, FLEX, etc.
+        # Do we need super.__init__()?
         self.player_df = player_df
         self.gsis_to_name = dict(zip(player_df['gsis_id'], player_df['player_name']))
         self.gsis_to_position = dict(zip(player_df['gsis_id'], player_df['position']))
@@ -36,7 +36,6 @@ class CustomEnvironment(AECEnv):
         self.possible_agents = [f"team_{i}" for i in range(num_teams)]
         self.agents = self.possible_agents[:]
         self.agent_name_mapping = {agent: i for i, agent in enumerate(self.possible_agents)}
-
 
         # Collect all players
         self.player_pool = self._generate_all_players()
@@ -117,36 +116,9 @@ class CustomEnvironment(AECEnv):
         # Ensure the action is a valid integer within the range of available players
         if 0 <= action < len(self.player_pool):
             player = self.player_pool[action]
-            position = self.player_positions[player]
-            
-            # Check if the player is available and if the team has room for the position
-            player_available = player in self.available_players
-            position_room = self.team_positions[agent][position] < self.position_limits[position]
-            flex_room = (self.team_positions[agent]['FLEX'] < self.position_limits['FLEX']) & (position != 'QB')
-            bench_room = self.team_positions[agent]['BENCH'] < self.position_limits['BENCH']
-
-            valid_pick = player_available and (position_room or flex_room or bench_room)
+            valid_pick = self._draft_player(agent, player)
 
         if valid_pick:
-            # Update the team roster and positions such that position players are chosen first, then FLEX, then BENCH
-            self.team_rosters[agent].append(player)
-            if position_room:
-                i = self.team_positions[agent][position]
-                self.team_positions_roster[agent][position][i] = player
-                self.team_positions[agent][position] += 1
-            elif flex_room:
-                i = self.team_positions[agent]['FLEX']
-                self.team_positions_roster[agent]['FLEX'][i] = player
-                self.team_positions[agent]['FLEX'] += 1
-            else:
-                i = self.team_positions[agent]['BENCH']
-                self.team_positions_roster[agent]['BENCH'][i] = player
-                self.team_positions[agent]['BENCH'] += 1
-
-            # Remove the player from available players and update draft history
-            self.available_players.remove(player)
-            self.draft_history.append((agent, player))
-   
             # Advance the draft to next pick
             self.current_pick += 1
 
@@ -163,8 +135,6 @@ class CustomEnvironment(AECEnv):
         else:
             self.rewards[agent] = 0 # or -1 if we want to penalize invalid picks
             print(f"[Invalid Pick] {agent} attempted invalid selection (action={action}). Needs to retry.")
-
-
 
     def render(self):
         round_num = self.current_pick // self.num_teams + (1 if self.current_pick % self.num_teams != 0 else 0)
@@ -191,12 +161,37 @@ class CustomEnvironment(AECEnv):
         return list(self.player_df['gsis_id'])
     
     def _draft_player(self, agent, player):
-        if player in self.available_players:
-            self.available_players.remove(player)
-            self.team_rosters[agent].append(player)
-            self.draft_history.append((agent, player))
-            return True
-        return False
+        # Ensure the player is valid and available
+        if player not in self.available_players:
+            return False
+        
+        position = self.player_positions[player]
+        position_room = self.team_positions[agent][position] < self.position_limits[position]
+        flex_room = (self.team_positions[agent]['FLEX'] < self.position_limits['FLEX']) & (position != 'QB')
+        bench_room = self.team_positions[agent]['BENCH'] < self.position_limits['BENCH']
+
+        if not (position_room or flex_room or bench_room):
+            return False
+        
+        # Update the team roster and positions such that position players are chosen first, then FLEX, then BENCH
+        self.team_rosters[agent].append(player)
+        if position_room:
+            i = self.team_positions[agent][position]
+            self.team_positions_roster[agent][position][i] = player
+            self.team_positions[agent][position] += 1
+        elif flex_room:
+            i = self.team_positions[agent]['FLEX']
+            self.team_positions_roster[agent]['FLEX'][i] = player
+            self.team_positions[agent]['FLEX'] += 1
+        else:
+            i = self.team_positions[agent]['BENCH']
+            self.team_positions_roster[agent]['BENCH'][i] = player
+            self.team_positions[agent]['BENCH'] += 1
+
+        # Remove the player from available players and update draft history
+        self.available_players.remove(player)
+        self.draft_history.append((agent, player))
+        return True
     
     def _get_available_players(self):
         return self.available_players
@@ -251,29 +246,9 @@ class CustomEnvironment(AECEnv):
             }
             for agent, positions in self.team_positions_roster.items()
         }
-    
-    def _evaluate_team(self, agent):
-        # Takes an agent's team and returns a score based on the sum of end of season scores for each starting player
-        # Starting players are defined as the best season-end scoring players that can fill the starting positions
-        # Since the best players will become the starting players throughout the season
-        
-        # First, we need to get the players on the team and their season-end scores
-        team_players = self.team_rosters[agent]
-        team_scores = {gsis_id: self.player_df[self.player_df['gsis_id'] == gsis_id]['fantasy_pts'] for gsis_id in team_players}
-        print(team_scores)
-
-        # Then, we need to filter the players based on the position limits
-        # Loop through each position and select best players in that position still available
-
-        
-        # Finally, we return the sum of the scores of the starting players
 
 
-        # Place-holder random score
-        return np.random.rand()
-
-
-
+# ------------------------------------ Usage Example ------------------------------------
 
 players = pd.read_csv("data/player_projections/model_06_12_predictions.csv")
 player_positions = pd.read_csv("data/processed/projection_models_test_06_02.csv")
@@ -283,7 +258,7 @@ player_positions['position']= player_positions['position'].str.replace('position
 players = players.merge(player_positions[['gsis_id', 'season', 'position', 'fantasy_pts']], on=['gsis_id', 'season'], how='left')
 players_2023 = players[players['season'] == 2023]
 
-env = CustomEnvironment(players_2023, num_teams=4, draft_type='snake', rounds=14)
+env = CustomEnvironment(players_2023, num_teams=2, draft_type='snake', rounds=14)
 env.reset()
 
 while env.agent_selection is not None:
@@ -316,6 +291,8 @@ for agent in env.possible_agents:
     print(f"{agent} score: {env.rewards[agent]}")
     print(f"{agent} optimized lineup: {env.optimized_lineups[env.optimized_lineups['agent']==agent]}")
 
-            
+top_score = max(env.rewards.values())
+top_score_agent = max(env.rewards, key=env.rewards.get)
+print(f"\nTop team is {top_score_agent} with score {top_score}")
 
 
