@@ -13,8 +13,10 @@ class CustomEnvironment(AECEnv):
     def __init__(self, player_df:pd.DataFrame, num_teams=2, draft_type=None, rounds=14):
         # Need to add rules about restrictions on positions, FLEX, etc.
         self.player_df = player_df
-        self.player_pool = list(player_df['player_name'])
-        self.player_positions = dict(zip(player_df['player_name'], player_df['position']))
+        self.gsis_to_name = dict(zip(player_df['gsis_id'], player_df['player_name']))
+        self.gsis_to_position = dict(zip(player_df['gsis_id'], player_df['position']))
+        self.player_pool = list(player_df['gsis_id'])
+        self.player_positions = self.gsis_to_position
 
         # Initialize environment parameters
         self.num_teams = num_teams
@@ -79,6 +81,8 @@ class CustomEnvironment(AECEnv):
             }
             for agent in self.agents
         }
+        self.full_roster_df = None
+        self.optimized_lineups = None
 
         self.rewards = {agent: 0 for agent in self.agents} # Figure out how to handle rewards
         self.terminations = {agent: False for agent in self.agents}
@@ -142,18 +146,17 @@ class CustomEnvironment(AECEnv):
             # Remove the player from available players and update draft history
             self.available_players.remove(player)
             self.draft_history.append((agent, player))
-            self.rewards[agent] = 1
-
-            # Update rewards
-            self._cumulative_rewards[agent] += self.rewards[agent]
-
+   
             # Advance the draft to next pick
             self.current_pick += 1
 
             if self.current_pick >= self.total_picks:
+                self.full_roster_df = self._get_full_roster_df()
+                optimized_scores = self.full_roster_df.groupby('agent').apply(self._get_optimized_score)
+                self.optimized_lineups = self.full_roster_df.groupby('agent').apply(self._get_optimized_lineup)
                 for agent in self.agents:
                     self.terminations[agent] = True
-                    self.rewards[agent] = self._evaluate_team(agent)
+                    self.rewards[agent] = optimized_scores[agent]
             # Move to the next agent in the draft order
             self.agent_selection = self.current_agent()
 
@@ -166,8 +169,10 @@ class CustomEnvironment(AECEnv):
     def render(self):
         round_num = self.current_pick // self.num_teams + (1 if self.current_pick % self.num_teams != 0 else 0)
         print(f"\n--- Round {round_num} ---")       
+        named_rosters = self._get_named_team_positions_roster()
         for agent in self.possible_agents:
-            print(f"{agent} roster: {self.team_positions_roster[agent]}")
+            roster_names = named_rosters[agent]
+            print(f"{agent} roster: {roster_names}")
         print(f"Remaining players: {len(self.available_players)}")
 
     def observation_space(self, agent):
@@ -183,7 +188,7 @@ class CustomEnvironment(AECEnv):
         return self.possible_agents[agent_index]
 
     def _generate_all_players(self):
-        return list(self.player_df['player_name'])
+        return list(self.player_df['gsis_id'])
     
     def _draft_player(self, agent, player):
         if player in self.available_players:
@@ -213,9 +218,58 @@ class CustomEnvironment(AECEnv):
         vec = [1 if p in players else 0 for p in self.player_pool]
         return vec
     
+    def _get_full_roster_df(self):
+        rows = []
+        for agent, players in self.team_rosters.items():
+            for gsis_id in players:
+                rows.append({"agent": agent, "gsis_id": gsis_id})
+        roster_df = pd.DataFrame(rows)
+        return roster_df.merge(self.player_df[["gsis_id", "player_name", "position", "fantasy_pts"]], on="gsis_id", how="left")
+    
+    def _get_optimized_lineup(self, df):
+        lineup = []
+        for pos, limit in self.position_limits.items():
+            if pos not in ['FLEX', 'BENCH']:
+                top_players = df[df['position']==pos].nlargest(limit, 'fantasy_pts')
+                lineup.append(top_players)
+        
+        used_ids = pd.concat(lineup)['gsis_id']
+        
+        flex_pool = df[(df['position'].isin(["RB", "WR", "TE"])) & (~df['gsis_id'].isin(used_ids))]
+        lineup.append(flex_pool.nlargest(self.position_limits['FLEX'], 'fantasy_pts'))
+        return pd.concat(lineup)
+    
+    def _get_optimized_score(self, df):
+        lineup = self._get_optimized_lineup(df)
+        return lineup['fantasy_pts'].sum()
+    
+    def _get_named_team_positions_roster(self):
+        return {
+            agent: {
+                pos: [self.gsis_to_name.get(pid) if pid is not None else None for pid in players]
+                for pos, players in positions.items()
+            }
+            for agent, positions in self.team_positions_roster.items()
+        }
+    
     def _evaluate_team(self, agent):
-        # Placeholder for team evaluation logic
-        # For now, we return a random score
+        # Takes an agent's team and returns a score based on the sum of end of season scores for each starting player
+        # Starting players are defined as the best season-end scoring players that can fill the starting positions
+        # Since the best players will become the starting players throughout the season
+        
+        # First, we need to get the players on the team and their season-end scores
+        team_players = self.team_rosters[agent]
+        team_scores = {gsis_id: self.player_df[self.player_df['gsis_id'] == gsis_id]['fantasy_pts'] for gsis_id in team_players}
+        print(team_scores)
+
+        # Then, we need to filter the players based on the position limits
+        # Loop through each position and select best players in that position still available
+
+        
+        # Finally, we return the sum of the scores of the starting players
+
+
+        # Place-holder random score
         return np.random.rand()
 
 
@@ -226,10 +280,10 @@ player_positions = pd.read_csv("data/processed/projection_models_test_06_02.csv"
 position_columns = ["position_QB", "position_RB", "position_WR", "position_TE"]
 player_positions['position'] = player_positions[position_columns].idxmax(axis=1)
 player_positions['position']= player_positions['position'].str.replace('position_', '', regex=False)
-players = players.merge(player_positions[['gsis_id', 'season', 'position']], on=['gsis_id', 'season'], how='left')
+players = players.merge(player_positions[['gsis_id', 'season', 'position', 'fantasy_pts']], on=['gsis_id', 'season'], how='left')
 players_2023 = players[players['season'] == 2023]
 
-env = CustomEnvironment(players_2023, num_teams=12, draft_type='snake', rounds=14)
+env = CustomEnvironment(players_2023, num_teams=4, draft_type='snake', rounds=14)
 env.reset()
 
 while env.agent_selection is not None:
@@ -247,7 +301,7 @@ while env.agent_selection is not None:
             env.step(i)
 
             if env.current_pick > prev_pick:
-                print(f"{agent} picked {player} at pick #{prev_pick + 1}")
+                print(f"{agent} picked {env.gsis_to_name[player]} at pick #{prev_pick + 1}")
                 break
 
     env.render()
@@ -256,9 +310,11 @@ while env.agent_selection is not None:
         break
 
 print("\n=== Final Team Rosters ===")
+print(env.full_roster_df)
 for agent in env.possible_agents:
-    print(f"{agent}: {env.team_positions_roster[agent]}")
+    print(f"{agent}: {env._get_named_team_positions_roster()[agent]}")
     print(f"{agent} score: {env.rewards[agent]}")
+    print(f"{agent} optimized lineup: {env.optimized_lineups[env.optimized_lineups['agent']==agent]}")
 
             
 
