@@ -27,7 +27,7 @@ class CustomEnvironment(AECEnv):
             'WR': 2,
             'TE': 1,
             'FLEX': 1,
-            'BENCH': 8,
+            'BENCH': 7,
         }
 
         # Initialize state variables
@@ -202,11 +202,18 @@ class CustomEnvironment(AECEnv):
                 else:
                     round_order = list(range(self.num_teams))
                 draft_order.extend(round_order)
+        else:
+            draft_order = list(range(self.num_teams)) * self.max_rounds
         return draft_order
 
     def _player_vector(self, players):
         vec = [1 if p in players else 0 for p in self.player_pool]
         return vec
+    
+
+
+
+
 
 players = pd.read_csv("data/player_projections/model_06_12_predictions.csv")
 player_positions = pd.read_csv("data/processed/projection_models_test_06_02.csv")
@@ -220,17 +227,22 @@ env = CustomEnvironment(players_2023, num_teams=12, draft_type='snake', rounds=1
 env.reset()
 
 while env.agent_selection is not None:
+    if len(env.available_players) == 0:
+        print("\n[STOPPING EARLY] No more players available to draft.")
+        break
+
     print(f"\nCurrent Agent: {env.agent_selection}")
     agent = env.agent_selection
 
     for i, player in enumerate(env.player_pool): # Super basic policy, just select next player
         if player in env.available_players:
             print(f"\nAgent {agent} picking at pick #{env.current_pick + 1}")
-            print(f"{agent} positions: {env.team_positions[agent]}")
-            action = i
-            break
+            prev_pick = env.current_pick
+            env.step(i)
 
-    env.step(action)
+            if env.current_pick > prev_pick:
+                print(f"{agent} picked {player} at pick #{prev_pick + 1}")
+                break
 
     env.render()
 
@@ -239,8 +251,7 @@ while env.agent_selection is not None:
 
 print("\n=== Final Team Rosters ===")
 for agent in env.possible_agents:
-    print(f"{agent}: {env.team_rosters[agent]}")
-    print(f"{agent} positions: {env.team_positions[agent]}")
+    print(f"{agent}: {env.team_positions_roster[agent]}")
 
             
 
