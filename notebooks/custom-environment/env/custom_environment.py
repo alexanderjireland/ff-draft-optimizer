@@ -129,7 +129,10 @@ class CustomEnvironment(AECEnv):
                 self.optimized_lineups = self.full_roster_df.groupby('agent').apply(self._get_optimized_lineup)
                 for agent in self.agents:
                     self.terminations[agent] = True
-                    self.rewards[agent] = optimized_scores[agent]
+                    if self.rewards[agent]:
+                        self.rewards[agent] += optimized_scores[agent]
+                    else:
+                        self.rewards[agent] = optimized_scores[agent]
             # Move to the next agent in the draft order
             self.agent_selection = self.current_agent()
 
