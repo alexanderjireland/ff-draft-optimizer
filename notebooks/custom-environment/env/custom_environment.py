@@ -17,6 +17,7 @@ class CustomEnvironment(AECEnv):
         self.gsis_to_position = dict(zip(player_df['gsis_id'], player_df['position']))
         self.player_pool = list(player_df['gsis_id'])
         self.player_positions = self.gsis_to_position
+        self.player_projections = list(player_df['median_prediction'])
 
         # Initialize environment parameters
         self.num_teams = num_teams
@@ -50,6 +51,8 @@ class CustomEnvironment(AECEnv):
         self._observation_spaces = {
             agent: spaces.Dict({
                 "available_players": spaces.MultiBinary(len(self.player_pool)),
+                "player_projections": spaces.MultiBinary(len(self.player_pool)),
+                "player_positions": spaces.MultiBinary(len(self.player_pool)),
                 "team_roster": spaces.MultiBinary(len(self.player_pool)),
                 "team_positions": spaces.Dict({
                     pos: spaces.Discrete(limit) for pos, limit in self.position_limits.items()
@@ -82,6 +85,12 @@ class CustomEnvironment(AECEnv):
         }
         self.full_roster_df = None
         self.optimized_lineups = None
+        self.team_positions_available = {
+            agent: {
+                pos: 1 for pos in self.position_limits
+            }
+            for agent in self.agents
+        }
 
         self.rewards = {agent: 0 for agent in self.agents} # Figure out how to handle rewards
         self.terminations = {agent: False for agent in self.agents}
@@ -92,6 +101,8 @@ class CustomEnvironment(AECEnv):
     def observe(self, agent):
         return {
             "available_players": self._player_vector(self.available_players),
+            "player_projections": self.player_projections,
+            "player_positions": list(self.player_positions.values()),
             "team_roster": self._player_vector(self.team_rosters[agent]),
             "team_positions": {
                 pos: self.team_positions[agent][pos] for pos in self.position_limits
@@ -116,12 +127,12 @@ class CustomEnvironment(AECEnv):
         # Ensure the action is a valid integer within the range of available players
         if 0 <= action < len(self.player_pool):
             player = self.player_pool[action]
-            valid_pick = self._draft_player(player)
+            valid_pick = self._draft_player(agent, player)
 
         if valid_pick:
             # Advance the draft to next pick
             self.current_pick += 1
-            self.rewards[agent] += self._get_draft_pick_reward(agent, player)
+            #self.rewards[agent] += self._get_draft_pick_reward(agent, player)
 
             if self.current_pick >= self.total_picks:
                 self.full_roster_df = self._get_full_roster_df()
@@ -175,10 +186,13 @@ class CustomEnvironment(AECEnv):
         bench_room = self.team_positions[agent]['BENCH'] < self.position_limits['BENCH']
 
         if not (position_room or flex_room or bench_room):
+            if self.team_positions_available[agent][position] != 0:
+                self.team_positions_available[agent][position] = 0
             return False
         
         # Update the team roster and positions such that position players are chosen first, then FLEX, then BENCH
         self.team_rosters[agent].append(player)
+        print(f'team rosters: {self.team_rosters}')
         if position_room:
             i = self.team_positions[agent][position]
             self.team_positions_roster[agent][position][i] = player
@@ -244,9 +258,15 @@ class CustomEnvironment(AECEnv):
     
     def _get_draft_pick_reward(self, player, beta=0.1, gamma=1.0):
         # Get draft pick reward based on combination of the player's projected and actual fantasy points
-        actual_pts = self.player_df.loc[self.player_df['gsis_id'] == player, 'fantasy_pts'].values[0]
-        projected_pts = self.player_df.loc[self.player_df['gsis_id'] == player, 'fantasy_pts'].values[0]
-        reward = projected_pts + beta * (actual_pts - projected_pts) # beta = 1 for actual pts, 0 for projected pts
+        print(self.player_df['gsis_id'].unique)
+        print(self.player_df[self.player_df['gsis_id'] == player])
+        actual_pts = self.player_df[self.player_df['gsis_id'] == player]['fantasy_pts']
+        projected_pts = self.player_df[self.player_df['gsis_id'] == player]['fantasy_pts']
+        print(player)
+        print(actual_pts)
+        print(projected_pts)
+        print(beta)
+        reward = projected_pts + (beta * (actual_pts - projected_pts)) # beta = 1 for actual pts, 0 for projected pts
         return gamma * reward
     
     def _get_named_team_positions_roster(self):
@@ -258,7 +278,7 @@ class CustomEnvironment(AECEnv):
             for agent, positions in self.team_positions_roster.items()
         }
 
-
+"""
 # ------------------------------------ Usage Example ------------------------------------
 
 players = pd.read_csv("data/player_projections/model_06_12_predictions.csv")
@@ -307,3 +327,4 @@ top_score_agent = max(env.rewards, key=env.rewards.get)
 print(f"\nTop team is {top_score_agent} with score {top_score}")
 
 
+"""
