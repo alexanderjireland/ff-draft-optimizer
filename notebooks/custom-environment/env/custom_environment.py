@@ -144,6 +144,9 @@ class CustomEnvironment(AECEnv):
                         self.rewards[agent] += optimized_scores[agent]
                     else:
                         self.rewards[agent] = optimized_scores[agent]
+
+            self._update_available_positions(agent)
+            
             # Move to the next agent in the draft order
             self.agent_selection = self.current_agent()
 
@@ -185,11 +188,6 @@ class CustomEnvironment(AECEnv):
         flex_room = (self.team_positions[agent]['FLEX'] < self.position_limits['FLEX']) & (position != 'QB')
         bench_room = self.team_positions[agent]['BENCH'] < self.position_limits['BENCH']
 
-        if not (position_room or flex_room or bench_room):
-            if self.team_positions_available[agent][position] != 0:
-                self.team_positions_available[agent][position] = 0
-            return False
-        
         # Update the team roster and positions such that position players are chosen first, then FLEX, then BENCH
         self.team_rosters[agent].append(player)
         print(f'team rosters: {self.team_rosters}')
@@ -201,10 +199,12 @@ class CustomEnvironment(AECEnv):
             i = self.team_positions[agent]['FLEX']
             self.team_positions_roster[agent]['FLEX'][i] = player
             self.team_positions[agent]['FLEX'] += 1
-        else:
+        elif bench_room:
             i = self.team_positions[agent]['BENCH']
             self.team_positions_roster[agent]['BENCH'][i] = player
             self.team_positions[agent]['BENCH'] += 1
+        else:
+            print(f'No room left on team to draft.')
 
         # Remove the player from available players and update draft history
         self.available_players.remove(player)
@@ -231,6 +231,22 @@ class CustomEnvironment(AECEnv):
         vec = [1 if p in players else 0 for p in self.player_pool]
         return vec
     
+    def _update_available_positions(self, agent):
+        flex_room = self.team_positions[agent]['FLEX'] < self.position_limits['FLEX']
+        bench_room = self.team_positions[agent]['BENCH'] < self.position_limits['BENCH']
+
+        if not flex_room:
+            self.team_positions_available[agent]['FLEX'] = 0
+        if not bench_room:
+            self.team_positions_available[agent]['BENCH'] = 0
+        
+        for pos in ['QB', 'RB', 'WR', 'TE']:
+            is_flex_eligible = pos != 'QB'
+
+            if not (self.team_positions[agent][pos] < self.position_limits[pos] or
+                    (is_flex_eligible and flex_room) or bench_room):
+                self.team_positions_available[agent][pos] = 0
+                
     def _get_full_roster_df(self):
         rows = []
         for agent, players in self.team_rosters.items():

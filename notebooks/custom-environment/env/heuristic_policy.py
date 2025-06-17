@@ -16,16 +16,21 @@ class BasicHeuristicPolicy:
         available_players = obs['available_players']
         if np.random.rand() < self.epsilon:
             print('rand')
-            return np.random.choice(available_players)
+            return np.random.choice(np.where(available_players)[0])
         else:
             print('ha')
             return self._heuristic_action(obs, team_positions_available)
         
     def _heuristic_action(self, obs, team_positions_available):
+        print('hey')
         projections = obs['player_projections']
         position_available = [team_positions_available[pos] for pos in obs['player_positions']]
         available_players = np.multiply(obs['available_players'], position_available)
-        best_player = np.argmax(np.multiply(projections, available_players))
+        print(available_players)
+        if np.sum(available_players) > 0:
+            best_player = np.argmax(np.multiply(projections, available_players))
+        else:
+            print("No valid players found...")
         print(f'Best player: {best_player} with proj {projections[best_player]}')
         return best_player
     
