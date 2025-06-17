@@ -190,7 +190,6 @@ class CustomEnvironment(AECEnv):
 
         # Update the team roster and positions such that position players are chosen first, then FLEX, then BENCH
         self.team_rosters[agent].append(player)
-        print(f'team rosters: {self.team_rosters}')
         if position_room:
             i = self.team_positions[agent][position]
             self.team_positions_roster[agent][position][i] = player
