@@ -52,6 +52,6 @@ for episode in tqdm(range(num_episodes)):
     """
 
     if episode % 10 == 0:
-        print(f"[Episode {episode}] Scores: {[env.rewards[a] for a in agents]}")
+        tqdm.write(f"[Episode {episode}] Scores: {[env.rewards[a] for a in agents]}")
 
 

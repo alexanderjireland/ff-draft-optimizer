@@ -1,9 +1,10 @@
-from pettingzoo import ParallelEnv
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+
+from gymnasium import spaces
 from pettingzoo import AECEnv
 from pettingzoo.utils import agent_selector
-import pandas as pd
-from gymnasium import spaces
-import numpy as np
 
 class CustomEnvironment(AECEnv):
     metadata = {
@@ -12,12 +13,8 @@ class CustomEnvironment(AECEnv):
 
     def __init__(self, player_df:pd.DataFrame, num_teams=2, draft_type=None, rounds=14):
         # Do we need super.__init__()?
+        
         self.player_df = player_df
-        self.gsis_to_name = dict(zip(player_df['gsis_id'], player_df['player_name']))
-        self.gsis_to_position = dict(zip(player_df['gsis_id'], player_df['position']))
-        self.player_pool = list(player_df['gsis_id'])
-        self.player_positions = self.gsis_to_position
-        self.player_projections = list(player_df['median_prediction'])
 
         # Initialize environment parameters
         self.num_teams = num_teams
@@ -33,49 +30,63 @@ class CustomEnvironment(AECEnv):
             'BENCH': 7,
         }
 
-        # Initialize state variables
-        self.possible_agents = [f"team_{i}" for i in range(num_teams)]
-        self.agents = self.possible_agents[:]
-        self.agent_name_mapping = {agent: i for i, agent in enumerate(self.possible_agents)}
+        self._initialize_agents()
+        self._initialize_player_metadata()
+        self._initialize_spaces()
 
-        # Collect all players
-        self.player_pool = self._generate_all_players()
+
+        # Collect all available players
         self.available_players = self.player_pool.copy()
 
-        # Initialize action spaces for each agent (equal to number of players, .i.e., possible draft picks/actions)
-        self._action_spaces = {
-            agent: spaces.Discrete(len(self.player_pool)) for agent in self.agents
-        }
+        # Draft tracking
+        self.draft_order = self._get_draft_order()
 
-        # Initialize observation spaces for each agent
+        self.agents = []
+    
+    def _initialize_player_metadata(self):
+        self.gsis_to_name = dict(zip(self.player_df['gsis_id'], self.player_df['player_name']))
+        self.gsis_to_position = dict(zip(self.player_df['gsis_id'], self.player_df['position']))
+        self.player_pool = self._generate_all_players()
+        self.player_projections = list(self.player_df['median_prediction'])
+        self.player_positions = self.gsis_to_position
+
+    def _initialize_spaces(self):
+        num_players = len(self.player_pool)
+        self._action_spaces = {
+            agent: spaces.Discrete(num_players) for agent in self.agents
+        }
         self._observation_spaces = {
             agent: spaces.Dict({
-                "available_players": spaces.MultiBinary(len(self.player_pool)),
-                "player_projections": spaces.MultiBinary(len(self.player_pool)),
-                "player_positions": spaces.MultiBinary(len(self.player_pool)),
-                "team_roster": spaces.MultiBinary(len(self.player_pool)),
+                "available_players": spaces.MultiBinary(num_players),
+                "player_projections": spaces.MultiBinary(num_players),
+                "player_positions": spaces.MultiBinary(num_players),
+                "team_roster": spaces.MultiBinary(num_players),
                 "team_positions": spaces.Dict({
                     pos: spaces.Discrete(limit) for pos, limit in self.position_limits.items()
                 })
             }) for agent in self.agents
         }
 
-        # Draft tracking
-        self.draft_order = self._get_draft_order()
-
-        self.agents = []
+    def _initialize_agents(self):
+        self.possible_agents = [f"team_{i}" for i in range(self.num_teams)]
+        self.agents = self.possible_agents[:]
+        self.agent_name_mapping = {agent: i for i, agent in enumerate(self.possible_agents)}
         
+
+
+
+
     def reset(self):
         # Reset the environment to its initial state
         # Will need to be called at the start of each new draft
         self.current_pick = 0
         self.available_players = self.player_pool.copy()
         self.draft_history = []
+        self.agents = self.possible_agents[:]
+        self.agent_selection = self.current_agent()
+
         self.team_rosters = {agent: [] for agent in self.possible_agents}
         self.team_positions = {agent: {pos: 0 for pos in self.position_limits} for agent in self.possible_agents}
-        self.agents = self.possible_agents[:]
-        self.current_pick = 0
-        self.agent_selection = self.current_agent()
         self.team_positions_roster = {
             agent: {
                 pos: [None] * self.position_limits[pos]
@@ -83,8 +94,6 @@ class CustomEnvironment(AECEnv):
             }
             for agent in self.agents
         }
-        self.full_roster_df = None
-        self.optimized_lineups = None
         self.team_positions_available = {
             agent: {
                 pos: 1 for pos in self.position_limits
@@ -92,23 +101,19 @@ class CustomEnvironment(AECEnv):
             for agent in self.agents
         }
 
+        self.full_roster_df = None
+        self.optimized_lineups = None
+
         self.rewards = {agent: 0 for agent in self.agents} # Figure out how to handle rewards
         self.terminations = {agent: False for agent in self.agents}
         self.truncations = {agent: False for agent in self.agents}
         self.infos = {agent: {} for agent in self.agents}
         self._cumulative_rewards = {agent: 0 for agent in self.agents}
 
-    def observe(self, agent):
-        return {
-            "available_players": self._player_vector(self.available_players),
-            "player_projections": self.player_projections,
-            "player_positions": list(self.player_positions.values()),
-            "team_roster": self._player_vector(self.team_rosters[agent]),
-            "team_positions": {
-                pos: self.team_positions[agent][pos] for pos in self.position_limits
-            }
-        }
-    
+
+
+
+
     def step(self, action):
         # Ensure the action is valid
         assert self.agent_selection is not None
@@ -121,39 +126,24 @@ class CustomEnvironment(AECEnv):
             self._was_dead_step(action)
             return
         
-        player = None
-        valid_pick = False
-
-        # Ensure the action is a valid integer within the range of available players
-        if 0 <= action < len(self.player_pool):
-            player = self.player_pool[action]
-            valid_pick = self._draft_player(agent, player)
-
-        if valid_pick:
-            # Advance the draft to next pick
-            self.current_pick += 1
-            #self.rewards[agent] += self._get_draft_pick_reward(agent, player)
-
-            if self.current_pick >= self.total_picks:
-                self.full_roster_df = self._get_full_roster_df()
-                optimized_scores = self.full_roster_df.groupby('agent').apply(self._get_optimized_score)
-                self.optimized_lineups = self.full_roster_df.groupby('agent').apply(self._get_optimized_lineup)
-                for agent in self.agents:
-                    self.terminations[agent] = True
-                    if self.rewards[agent]:
-                        self.rewards[agent] += optimized_scores[agent]
-                    else:
-                        self.rewards[agent] = optimized_scores[agent]
-
-            self._update_available_positions(agent)
-            
-            # Move to the next agent in the draft order
-            self.agent_selection = self.current_agent()
-
+        player = self._get_player_from_action(action)
+        if player and self._draft_player(agent, player):
+            self._advance_draft(agent, player)
         else:
             self.rewards[agent] = 0 # or -1 if we want to penalize invalid picks
-            print(f"[Invalid Pick] {agent} attempted invalid selection (action={action}). Needs to retry.")
+            tqdm.write(f"[Invalid Pick] {agent} attempted invalid selection (action={action}). Needs to retry.")
 
+    def observe(self, agent):
+        return {
+            "available_players": self._player_vector(self.available_players),
+            "player_projections": self.player_projections,
+            "player_positions": list(self.player_positions.values()),
+            "team_roster": self._player_vector(self.team_rosters[agent]),
+            "team_positions": {
+                pos: self.team_positions[agent][pos] for pos in self.position_limits
+            }
+        }
+    
     def render(self):
         round_num = self.current_pick // self.num_teams + (1 if self.current_pick % self.num_teams != 0 else 0)
         print(f"\n--- Round {round_num} ---")       
@@ -174,10 +164,27 @@ class CustomEnvironment(AECEnv):
             return None
         agent_index = self.draft_order[self.current_pick]
         return self.possible_agents[agent_index]
-
-    def _generate_all_players(self):
-        return list(self.player_df['gsis_id'])
     
+
+
+
+    
+    def _get_player_from_action(self, action):
+        if 0 <= action < len(self.player_pool):
+            return self.player_pool[action]
+        return None
+    
+    def _advance_draft(self, agent, player):
+        # Advance the draft to next pick
+        self.current_pick += 1
+        #self.rewards[agent] += self._get_draft_pick_reward(agent, player)
+        if self.current_pick >= self.total_picks:
+            self._finalize_draft()
+        self._update_available_positions(agent)
+            
+        # Move to the next agent in the draft order
+        self.agent_selection = self.current_agent()
+
     def _draft_player(self, agent, player):
         # Ensure the player is valid and available
         if player not in self.available_players:
@@ -203,16 +210,25 @@ class CustomEnvironment(AECEnv):
             self.team_positions_roster[agent]['BENCH'][i] = player
             self.team_positions[agent]['BENCH'] += 1
         else:
-            print(f'No room left on team to draft.')
+            tqdm.write(f'No room left on team to draft.')
+            return False
 
         # Remove the player from available players and update draft history
         self.available_players.remove(player)
         self.draft_history.append((agent, player))
         return True
     
-    def _get_available_players(self):
-        return self.available_players
-    
+    def _finalize_draft(self):
+        self.full_roster_df = self._get_full_roster_df()
+        optimized_scores = self.full_roster_df.groupby('agent').apply(self._get_optimized_score)
+        self.optimized_lineups = self.full_roster_df.groupby('agent').apply(self._get_optimized_lineup)
+        for agent in self.agents:
+            self.terminations[agent] = True
+            self.rewards[agent] += optimized_scores[agent]
+
+
+
+
     def _get_draft_order(self):
         draft_order = []
         if self.snake_draft:
@@ -225,10 +241,6 @@ class CustomEnvironment(AECEnv):
         else:
             draft_order = list(range(self.num_teams)) * self.max_rounds
         return draft_order
-
-    def _player_vector(self, players):
-        vec = [1 if p in players else 0 for p in self.player_pool]
-        return vec
     
     def _update_available_positions(self, agent):
         flex_room = self.team_positions[agent]['FLEX'] < self.position_limits['FLEX']
@@ -245,7 +257,19 @@ class CustomEnvironment(AECEnv):
             if not (self.team_positions[agent][pos] < self.position_limits[pos] or
                     (is_flex_eligible and flex_room) or bench_room):
                 self.team_positions_available[agent][pos] = 0
-                
+
+    def _generate_all_players(self):
+        return list(self.player_df['gsis_id'])
+    
+    def _get_available_players(self):
+        return self.available_players
+    
+    def _player_vector(self, players):
+        vec = [1 if p in players else 0 for p in self.player_pool]
+        return vec
+
+
+
     def _get_full_roster_df(self):
         rows = []
         for agent, players in self.team_rosters.items():
@@ -283,6 +307,9 @@ class CustomEnvironment(AECEnv):
         print(beta)
         reward = projected_pts + (beta * (actual_pts - projected_pts)) # beta = 1 for actual pts, 0 for projected pts
         return gamma * reward
+
+           
+
     
     def _get_named_team_positions_roster(self):
         return {
