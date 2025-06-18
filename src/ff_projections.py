@@ -68,7 +68,7 @@ def create_X_y_train_test(pm_train_df, pm_test_df, cols_to_drop=['season', 'gsis
         ('imputer', KNNImputer()),
         ('scaler', StandardScaler()),
         ('poly', PolynomialFeatures(degree=2, include_bias=False)), # Adding polynomial features helps capture non-linear relationships
-        ('pca', PCA(n_components=0.95)) # PCA to reduce dimensionality added from polynomial features
+        # PCA to reduce dimensionality added from polynomial features
     ])
 
     # Should attempt training without PCA when compute time available
@@ -148,7 +148,7 @@ def add_is_draftable_column(X_train, y_train, X_test, y_test, threshold=83.125):
 
     return X_train, X_test
 
-def run_pm_model(X_train, y_train):
+def run_pm_model(X_train, y_train, filepath):
     """Fits a Bayesian linear regression model using PyMC to estimate fantasy point distributions.
 
     Provides a probabilistic framework to model uncertainty in player fantasy point projections.
@@ -160,6 +160,8 @@ def run_pm_model(X_train, y_train):
     Returns:
         arviz.InferenceData: Trace object containing posterior samples.
     """
+
+    real_df = pd.read_csv(filepath)
     # Begin by fitting a linear regression model to get initial estimates of priors
     print("Fitting initial linear regression model to get priors...")
     lr = LinearRegression()
@@ -177,29 +179,40 @@ def run_pm_model(X_train, y_train):
     # Ensure X_train and y_train are in the proper format
     df = pd.DataFrame(X_train)
     df["target"] = y_train.values
+    df["position"] = real_df.loc[X_train.index, "position"].values
 
     df_clean = df.dropna()
 
+    position_idx = df_clean['position'].astype('category').cat.codes.values
     X_pm_train = df_clean.drop("target", axis=1).values
     y_pm_train = df_clean["target"].values
 
     # Obtain feature names for the model (when using PCA, not all that helpful)
     feature_names = df_clean.drop("target", axis=1).columns.tolist()
-
+    print(f'real_df cols: {real_df.columns}')
     # Create a PyMC model
-    with pm.Model(coords={"features": feature_names}) as model:
+    with pm.Model(coords={"features": feature_names, "positions": np.unique(position_idx)}) as model:
+        pos = pm.Data("pos", position_idx, dims='obs') 
+        
         X_data = pm.Data("X_data", X_pm_train, dims=("obs", "features"))
         y_data = pm.Data("y_data", y_pm_train, dims="obs")
 
-        # Define priors based on the initial linear regression estimates
-        intercept = pm.Normal("intercept", mu=intercept_mean, sigma=5)
-        betas = pm.Normal("betas", mu=coef_mean, sigma=1.0, dims="features")
-        sigma = pm.HalfNormal("sigma", sigma=sigma_est)
+        intercept_mu = pm.Normal("intercept_mu", mu=intercept_mean, sigma=5)
+        intercept_sd = pm.Exponential("intercept_sd", lam=1)
+        intercept = pm.Normal("intercept", mu=intercept_mu, sigma = intercept_sd, dims="positions")
 
-        mu = intercept + pm.math.dot(X_data, betas)
+        betas_mu = pm.Normal("betas_mu", mu=coef_mean, sigma=1, dims='features')
+        betas_sd = pm.Exponential("betas_sd", lam=1, dims='features')
+        betas = pm.Normal("betas", mu=betas_mu, sigma=betas_sd, dims=("positions", "features"))
+        
+        beta_sigma = pm.Normal("beta_sigma", mu=0, sigma=1, shape=X_data.shape[1])
+        log_sigma = pm.Deterministic("log_sigma", pm.math.dot(X_data, beta_sigma))
+        sigma = pm.Deterministic("sigma", pm.math.exp(log_sigma))
 
-        y_obs = pm.Normal("y_obs", mu=mu, sigma=sigma, observed=y_data, dims="obs")
-
+        mu = intercept[pos] + pm.math.sum(X_data * betas[pos], axis=1) # dimensions don't match, need to fix
+        
+        nu = pm.Exponential("nu", 1/30)
+        y_obs = pm.StudentT("y_obs", nu=nu, mu=mu, sigma=sigma, observed=y_data, dims='obs')
         # Sample from the posterior
         print("Sampling from the posterior...")
         trace = pm.sample(draws=2000, tune=2000, chains=4, cores=4, target_accept=0.95, random_seed=11)
@@ -226,10 +239,11 @@ def split_data_and_train_pm_model(filepath, cols_to_drop=['season', 'gsis_id', '
     # Create X and y for training and testing
     X_train, y_train, X_test, y_test = create_X_y_train_test(pm_train_df, pm_test_df, cols_to_drop=cols_to_drop)
     # Add is_draftable column based on logistic regression threshold
-    X_train, X_test = add_is_draftable_column(X_train, y_train, X_test, y_test)
+    #X_train, X_test = add_is_draftable_column(X_train, y_train, X_test, y_test)
     # Run the probabilistic model
     print("Running probabilistic model...")
-    trace = run_pm_model(X_train.values, y_train)
+    #trace = run_pm_model(X_train.values, y_train)
+    trace = run_pm_model(X_train, y_train, filepath)
 
     return trace, X_test, y_test
 

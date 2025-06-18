@@ -8,7 +8,7 @@ players_2023 = players[players['season'] == 2023]
 
 env = CustomEnvironment(players_2023, num_teams=12, draft_type='snake', rounds=14)
 num_players = len(env.player_pool)
-num_episodes = 100
+num_episodes = 10
 
 agents = env.possible_agents
 num_agents = len(agents)
@@ -21,6 +21,7 @@ for episode in tqdm(range(num_episodes)):
     while env.agent_selection is not None and step_count < max_steps:
 
         agent = env.agent_selection
+
         obs = env.observe(agent)
         #print(f"obs: {obs}") 
 
@@ -36,11 +37,12 @@ for episode in tqdm(range(num_episodes)):
         env.step(action)
 
         reward = env.rewards[agent]
-        if env.current_pick > prev_pick:
-            policies[agent].update_policy(action, reward)
+        policies[agent].update_policy(action, reward)
         step_count += 1
 
-    """
+    if env.full_roster_df is None:
+        env._finalize_draft()
+    
     print("\n=== Final Team Rosters ===")
     print(env.full_roster_df)
     for agent in env.possible_agents:
@@ -49,9 +51,11 @@ for episode in tqdm(range(num_episodes)):
         print(f"{agent} optimized lineup: {env.optimized_lineups[env.optimized_lineups['agent']==agent]}")
 
     print("Exited loop after", step_count, "steps.")
-    """
 
     if episode % 10 == 0:
         tqdm.write(f"[Episode {episode}] Scores: {[env.rewards[a] for a in agents]}")
+
+#q_tables = {agent: policies[agent].q_table for agent in agents}
+#print(f"Q Tables: {q_tables}")
 
 

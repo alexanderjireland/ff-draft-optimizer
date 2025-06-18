@@ -12,7 +12,7 @@ class CustomEnvironment(AECEnv):
     }
 
     def __init__(self, player_df:pd.DataFrame, num_teams=2, draft_type=None, rounds=14):
-        # Do we need super.__init__()?
+        super().__init__()
         
         self.player_df = player_df
 
@@ -34,14 +34,13 @@ class CustomEnvironment(AECEnv):
         self._initialize_player_metadata()
         self._initialize_spaces()
 
+        self.position_str_to_index = {pos: i for i, pos in enumerate(['QB', 'RB', 'WR', 'TE'])}
 
         # Collect all available players
         self.available_players = self.player_pool.copy()
 
         # Draft tracking
         self.draft_order = self._get_draft_order()
-
-        self.agents = []
     
     def _initialize_player_metadata(self):
         self.gsis_to_name = dict(zip(self.player_df['gsis_id'], self.player_df['player_name']))
@@ -58,11 +57,11 @@ class CustomEnvironment(AECEnv):
         self._observation_spaces = {
             agent: spaces.Dict({
                 "available_players": spaces.MultiBinary(num_players),
-                "player_projections": spaces.MultiBinary(num_players),
-                "player_positions": spaces.MultiBinary(num_players),
+                "player_projections": spaces.Box(low=-np.inf, high=np.inf, shape=(num_players,), dtype=np.float32),
+                "player_positions": spaces.Box(low=0, high=3, shape=(num_players,), dtype=int),
                 "team_roster": spaces.MultiBinary(num_players),
                 "team_positions": spaces.Dict({
-                    pos: spaces.Discrete(limit) for pos, limit in self.position_limits.items()
+                    pos: spaces.Discrete(limit + 1) for pos, limit in self.position_limits.items()
                 })
             }) for agent in self.agents
         }
@@ -71,8 +70,6 @@ class CustomEnvironment(AECEnv):
         self.possible_agents = [f"team_{i}" for i in range(self.num_teams)]
         self.agents = self.possible_agents[:]
         self.agent_name_mapping = {agent: i for i, agent in enumerate(self.possible_agents)}
-        
-
 
 
 
@@ -118,15 +115,14 @@ class CustomEnvironment(AECEnv):
         # Ensure the action is valid
         assert self.agent_selection is not None
 
-        # Select the current agent
         agent = self.agent_selection
 
         # If the agent has already terminated, skip the step
         if self.terminations[agent]:
-            self._was_dead_step(action)
+            super()._was_dead_step(action)
             return
         
-        player = self._get_player_from_action(action)
+        player = self._get_player_fom_action(action)
         if player and self._draft_player(agent, player):
             self._advance_draft(agent, player)
         else:
@@ -137,7 +133,7 @@ class CustomEnvironment(AECEnv):
         return {
             "available_players": self._player_vector(self.available_players),
             "player_projections": self.player_projections,
-            "player_positions": list(self.player_positions.values()),
+            "player_positions": list(self.position_str_to_index[pos_str] for pos_str in self.player_positions.values()),
             "team_roster": self._player_vector(self.team_rosters[agent]),
             "team_positions": {
                 pos: self.team_positions[agent][pos] for pos in self.position_limits
@@ -222,9 +218,11 @@ class CustomEnvironment(AECEnv):
         self.full_roster_df = self._get_full_roster_df()
         optimized_scores = self.full_roster_df.groupby('agent').apply(self._get_optimized_score)
         self.optimized_lineups = self.full_roster_df.groupby('agent').apply(self._get_optimized_lineup)
-        for agent in self.agents:
+        for agent in self.possible_agents:
             self.terminations[agent] = True
             self.rewards[agent] += optimized_scores[agent]
+        print(f"_finalize_draft: agents = {self.agents}")
+        print(f"_finalize_draft: possible_agents = {self.possible_agents}")
 
 
 
@@ -299,8 +297,8 @@ class CustomEnvironment(AECEnv):
         # Get draft pick reward based on combination of the player's projected and actual fantasy points
         print(self.player_df['gsis_id'].unique)
         print(self.player_df[self.player_df['gsis_id'] == player])
-        actual_pts = self.player_df[self.player_df['gsis_id'] == player]['fantasy_pts']
-        projected_pts = self.player_df[self.player_df['gsis_id'] == player]['fantasy_pts']
+        actual_pts = self.player_df[self.player_df['gsis_id'] == player]['fantasy_pts'].item()
+        projected_pts = self.player_df[self.player_df['gsis_id'] == player]['median_prediction'].item()
         print(player)
         print(actual_pts)
         print(projected_pts)
