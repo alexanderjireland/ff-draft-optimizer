@@ -17,10 +17,15 @@ class PositionDQ:
 class DraftEnvironment(AECEnv):
     metadata = {
         "name": "custom_environment_v0",
+        "is_parallelizable": True,
+        "render_modes": ["human", "rgb_array"],
+        "render_fps": 30
     }
 
-    def __init__(self, player_df:pd.DataFrame, num_teams=2, draft_type=None, rounds=14, random_pool_size=100, real_scores_at_draft_end=False):
+    def __init__(self, player_df:pd.DataFrame, num_teams=2, draft_type=None, rounds=14, random_pool_size=100, real_scores_at_draft_end=False, render_mode=None):
         super().__init__()
+
+        self.render_mode = render_mode
         
         self.player_df = player_df
         self.random_pool_size = random_pool_size
