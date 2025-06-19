@@ -40,6 +40,7 @@ class DraftEnvironment(AECEnv):
         }
 
         self.possible_starting_positions = ['QB', 'RB', 'WR', 'TE']
+        self.flex_positions = ['RB', 'WR', 'TE']
 
         self._initialize_agents()
         self._initialize_player_metadata()
@@ -78,7 +79,7 @@ class DraftEnvironment(AECEnv):
     def _create_diffs_dq(self, pos_dq):
          dq = [proj_pts for _, proj_pts in pos_dq]
          dq.append(0)
-         return deque([b - a for a, b in zip(dq, dq[1:])])
+         return deque([a - b for a, b in zip(dq, dq[1:])])
     
     def _update_pos_dqs(self, pos):
          self.pos_dqs[pos].players.popleft()
@@ -119,6 +120,13 @@ class DraftEnvironment(AECEnv):
         self.team_positions_roster = {
             agent: {
                 pos: [None] * self.position_limits[pos]
+                for pos in self.position_limits
+            }
+            for agent in self.agents
+        }
+        self.team_positions_projections = {
+            agent: {
+                pos: [0] * self.position_limits[pos]
                 for pos in self.position_limits
             }
             for agent in self.agents
@@ -165,7 +173,7 @@ class DraftEnvironment(AECEnv):
                 "next_opponent_needs": self._get_next_opponent_needs(agent),
                 "pos_projected_pts": self._get_top_pos_proj_pts(),
                 "difference_with_replacement": self._get_difference_with_replacement(),
-                "hurt_score": self._get_hurt_score(),
+                "hurt_score": self._get_hurt_score(agent),
                 "difference_with_current_worst_starter": self._get_diff_with_current_worst_starter(agent)
         }
     
@@ -181,24 +189,52 @@ class DraftEnvironment(AECEnv):
         return [self.pos_dqs[pos].players[0][1] for pos in self.possible_starting_positions]
     
     def _get_team_needs(self, agent):
-        return self.team_positions_available[agent][:3]
+        if self.team_positions_available[agent]['FLEX'] & all(self.team_positions_available[agent][flex_pos]==0 for flex_pos in self.flex_positions):
+            return [self.team_positions_available[agent]['QB'], 1, 1, 1]
+        return [self.team_positions_available[agent][pos] for pos in self.possible_starting_positions]
     
     def _get_next_opponent_needs(self, agent):
-        # find a way to figure out the agent of next opponent (can't be self in snake draft, for example)
-        next_agent = agent + 1 #placeholder logic
+        next_agent = self._get_next_opponent(agent)
         return self._get_team_needs(next_agent)
     
+    def _get_next_opponent(self, agent):
+        agent = int(agent.str.replace('team_', ''))
+        next_agent = agent
+        pick_num = self.current_pick
+        while next_agent == agent and pick_num < self.total_picks:
+            next_agent = self.draft_order[pick_num+1]
+        return f'team_{next_agent}'
+    
     def _get_available_pos(self):
-        return [int(len(self.pos_dqs[pos])==0) for pos in self.possible_starting_positions]
+        return [int(len(self.pos_dqs[pos].players)>0) for pos in self.possible_starting_positions]
     
     def _get_diff_with_current_worst_starter(self, agent):
         # Need to handle FLEX as well
         agent_roster_worst_pos = []
-        for pos in self.possible_starting_positions:
-            pos_ids = self.team_positions_roster[agent][pos] # How to handle when None
-            if pos_ids is not None:
-                pos_roster_projections = [self.gsis_to_projections[id] for id in pos_ids]
-                agent_roster_worst_pos.append(min(pos_roster_projections))
-            else:
-                agent_roster_worst_pos.append(0)
+        if not self.team_positions_available[agent]['FLEX']:
+            flex_proj_pts = self.team_positions_projections[agent]['FLEX']
+            agent_roster_worst_pos = [min(self.team_positions_projections[agent]['QB']), flex_proj_pts, flex_proj_pts, flex_proj_pts]
+        else:
+            for pos in self.possible_starting_positions:
+                agent_roster_worst_pos.append(min(self.team_positions_projections[agent][pos]))
         return np.array(self._get_top_pos_proj_pts()) - np.array(agent_roster_worst_pos)
+    
+
+
+
+    def _get_draft_order(self):
+        draft_order = []
+        if self.snake_draft:
+            for round in range(1, self.max_rounds+1):
+                if self.snake_draft and round % 2 == 0:
+                    round_order = list(reversed(range(self.num_teams)))
+                else:
+                    round_order = list(range(self.num_teams))
+                draft_order.extend(round_order)
+        else:
+            draft_order = list(range(self.num_teams)) * self.max_rounds
+        return draft_order
+
+    #####################
+
+    #[0, 1, 1, 1] displayed for FLEX
