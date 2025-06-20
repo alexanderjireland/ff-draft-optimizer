@@ -8,8 +8,12 @@ Could incorporate probability a player gets injured into Bayesian regression mod
 
 -PPO on Google Colab
 	-Capture metadata (how many times invalid picks were made, rewards, rosters, times when agent chose pick that they already had but hurt other player, etc.)
+	-Reward at end difference between best (or next best if best) overall team score
+	-Consider a hybrid end reward strategy that combines real and sampled from posterior scores
 	-How to save model and test
 	-Implement model suggestions to a streamlit app
 
-
+-Streamlit App
+-Organize Code and Directory
+-Update README
 
