@@ -22,10 +22,12 @@ class DraftEnvironment(AECEnv):
         "render_fps": 30
     }
 
-    def __init__(self, player_df:pd.DataFrame, num_teams=2, draft_type=None, rounds=14, random_pool_size=100, real_scores_at_draft_end=False, render_mode=None):
+    def __init__(self, player_df:pd.DataFrame, num_teams=2, draft_type=None, rounds=14, random_pool_size=100, real_scores_at_draft_end=False, render_mode=None, flatten_obs=False):
+        print("Initializing DraftEnvironment")
         super().__init__()
 
         self.render_mode = render_mode
+        self.flatten_obs = flatten_obs
         
         self.player_df = player_df
         self.random_pool_size = random_pool_size
@@ -60,9 +62,15 @@ class DraftEnvironment(AECEnv):
         self.draft_order = self._get_draft_order()
 
         self.invalid_action_penalty = -50
+        print("Finished Initializing DraftEnvironment")
 
     def _initialize_player_metadata(self):
-        self.player_pool_df = self.player_df.sample(min(self.random_pool_size, len(self.player_df)))
+        print("_initialize_player_metadata")
+        self.player_pool_df = self.player_df.sample(
+            n=min(self.random_pool_size, len(self.player_df)), 
+            random_state=np.random.randint(0, 10000)
+        )
+     
         self.player_pool = self.player_pool_df['gsis_id'].to_list()
         self.gsis_to_name = dict(zip(self.player_pool_df['gsis_id'], self.player_pool_df['player_name']))
         self.gsis_to_position = dict(zip(self.player_pool_df['gsis_id'], self.player_pool_df['position']))
@@ -82,17 +90,19 @@ class DraftEnvironment(AECEnv):
              self.pos_dqs[pos] = PositionDQ(players=player_id_and_projections, diffs=diffs)
 
     def _sort_and_create_dq(self, pos):
+        print("_sort_and_create_dq")
         if pos not in self.draftable_positions:
                 raise ValueError(f"{pos} not in possible starting positions: {self.draftable_positions}")
         
         if not self.pos_player_pool[pos]:
             return deque()
         
-        return deque(sorted([(id, self.gsis_to_projections[id]) for id in self.pos_player_pool[pos]],
+        return deque(sorted([(id, self.gsis_to_projections.get(id, 0)) for id in self.pos_player_pool[pos]],
                                 key=lambda x: x[1],
                                 reverse=True))
     
     def _create_diffs_dq(self, pos_dq):
+        print("_create_diffs_dq")
         if not pos_dq:
             return deque()
         dq = [proj_pts for _, proj_pts in pos_dq]
@@ -100,6 +110,7 @@ class DraftEnvironment(AECEnv):
         return deque([a - b for a, b in zip(dq, dq[1:])])
     
     def _update_pos_dqs(self, pos):
+        print("_update_pos_dqs")
         if len(self.pos_dqs[pos].players) > 0:
             self.pos_dqs[pos].players.popleft()
         if len(self.pos_dqs[pos].diffs) > 0:
@@ -107,51 +118,58 @@ class DraftEnvironment(AECEnv):
         # What happens when these cannot execute?
 
     def _initialize_spaces(self):
+        print("_initialize_spaces")
         num_draftable_positions = 4
+        
+        if self.flatten_obs:
+            total_size = num_draftable_positions * 8
+            self._observation_spaces = {
+                agent: spaces.Box(low=-500, high=500, shape=(total_size,), dtype=np.float32)
+                for agent in self.agents
+            }
+        else:
+            self._observation_spaces = {
+                agent: spaces.Dict({
+                    "action_mask": spaces.MultiBinary(num_draftable_positions),
+                    "pos_available": spaces.MultiBinary(num_draftable_positions),
+                    "team_needs": spaces.MultiBinary(num_draftable_positions),
+                    "next_opponent_needs": spaces.MultiBinary(num_draftable_positions),
+                    "projected_pts": spaces.Box(low=-20, high=500, shape=(num_draftable_positions,), dtype=np.float32),
+                    "difference_with_replacement": spaces.Box(low=-500, high=500, shape=(num_draftable_positions,), dtype=np.float32),
+                    "hurt_score": spaces.Box(low=-500, high=500, shape=(num_draftable_positions,), dtype=np.float32),
+                    "difference_with_current_worst_starter": spaces.Box(low=-500, high=500, shape=(num_draftable_positions,), dtype=np.float32)
+                }) for agent in self.agents
+            }
+        
         self._action_spaces = {
             agent: spaces.Discrete(num_draftable_positions) for agent in self.agents
         }
-        self._observation_spaces = {
-            agent: spaces.Dict({
-                "pos_available": spaces.MultiBinary(num_draftable_positions),
-                "team_needs": spaces.MultiBinary(num_draftable_positions),
-                "next_opponent_needs": spaces.MultiBinary(num_draftable_positions),
-                "projected_pts": spaces.Box(low=-20, high=500, shape=(num_draftable_positions,), dtype=np.float32),
-                "difference_with_replacement": spaces.Box(low=-500, high=500, shape=(num_draftable_positions,), dtype=np.float32),
-                "hurt_score": spaces.Box(low=-500, high=500, shape=(num_draftable_positions,), dtype=np.float32),
-                "difference_with_current_worst_starter": spaces.Box(low=-500, high=500, shape=(num_draftable_positions,), dtype=np.float32)
-            }) for agent in self.agents
-        }
 
     def _initialize_agents(self):
+        print("_initialize_agents")
         self.possible_agents = [f"team_{i}" for i in range(self.num_teams)]
         self.agents = self.possible_agents[:]
         self.agent_name_mapping = {agent: i for i, agent in enumerate(self.possible_agents)}
 
 
     def reset(self, seed=None, options=None):
-        # Reset the environment to its initial state
-        # Will need to be called at the start of each new draft
+        print("Reset")
+        if seed is not None:
+            np.random.seed(seed)
+    
         self.current_pick = 0
         self.draft_history = []
         self.agents = self.possible_agents[:]
-        self.agent_selection = self.current_agent()
+        
+        self._initialize_player_metadata()
 
-        self._initialize_player_metadata() # reset to new random sample
-
+        print("-" * 50)
+        print(f"PLAYER POOL DF HEAD: {self.player_pool_df.head()}")
+        print("-" * 50)
+        
         # Collect all available players
         self.available_players = self.player_pool.copy()
-
-        #self.team_rosters = {agent: [] for agent in self.possible_agents}
-        #self.team_positions = {agent: {pos: 0 for pos in self.position_limits} for agent in self.possible_agents}
-        #self.team_positions_roster = { # Can this one be removed?
-        #    agent: {
-        #        pos: [None] * self.position_limits[pos]
-        #        for pos in self.position_limits
-        #    }
-        #    for agent in self.agents
-        #}
-
+        
         self.team_info = {
             agent: {
                 'roster': [],
@@ -160,157 +178,276 @@ class DraftEnvironment(AECEnv):
                 'pos_projections': {pos: [0] * self.position_limits[pos] for pos in self.position_limits}
             } for agent in self.agents
         }
-
+        
         self.full_roster_df = None
         self.optimized_lineups = None
-
+        
         self.rewards = {agent: 0.0 for agent in self.agents}
         self.terminations = {agent: False for agent in self.agents}
         self.truncations = {agent: False for agent in self.agents}
         self.infos = {agent: {} for agent in self.agents}
         self._cumulative_rewards = {agent: 0.0 for agent in self.agents}
+        self.draft_pick_reward_values = {}
+        
+        self.agent_selection = self.current_agent()
+        
+        if self.agent_selection:
+            return self.observe(self.agent_selection)
+        return self.observe(self.possible_agents[0]), {}
 
-        return self.observe(self.agent_selection) if self.agent_selection else {}
 
     def step(self, action):
-        # Ensure the action is valid
+        print("step")
         if self.agent_selection is None:
             return
 
         agent = self.agent_selection
 
-        # If the agent has already terminated, skip the step
+        step_reward = 0
+
         if self.terminations[agent] or self.truncations[agent]:
-            super()._was_dead_step(None)
+            self._was_dead_step(action)
             return
         
-        if action < 0 or action >= len(self.draftable_positions) or action is None:
+        if not isinstance(action, (int, np.integer)) or action < 0 or action >= len(self.draftable_positions):
             print(f'[Invalid Action] {agent} attempted invalid action (action={action}). Penalizing and skipping turn.')
-            self.rewards[agent] += self.invalid_action_penalty
+            step_reward = self.invalid_action_penalty
+            self.rewards[agent] = step_reward
+            print(f"Rewards after invalid action: {self.rewards}")
             self._advance_draft(None)
             return
         
         player = self._get_player_from_action(action)
         if player:
-            if self._draft_player(agent, action, player):
+            draft_successfull, step_reward = self._draft_player(agent, action, player)
+            if draft_successfull:
+                self.rewards[agent] = step_reward
+                print(f"[DEBUG] Reward assigned to {agent}: {self.rewards}")
                 self._advance_draft(action)
             else:
                 print(f"[Invalid Pick (Game Logic)] {agent} attempted invalid selection (action={action}). Penalizing and skipping turn.")
-                self.rewards[agent] += self.invalid_action_penalty
+                step_reward = self.invalid_action_penalty
+                self.rewards[agent] = step_reward
+                print(f"Rewards after invalid: {self.rewards}")
                 self._advance_draft(None)
         else:
             print(f"[Invalid Pick (No Player)] {agent} attempted invalid selection (action={action}). Needs to retry.")
-            self.rewards[agent] += self.invalid_action_penalty
+            step_reward = self.invalid_action_penalty
+            self.rewards[agent] = step_reward
+            print(f"Rewards: {self.rewards}")
+            self._advance_draft(None)
+
+    def _was_dead_step(self, action):
+        print("_was_dead_step")
+        if self.current_pick < self.total_picks:
             self._advance_draft(None)
 
     def _get_player_from_action(self, action):
-        # returns player id for action/position selection
-        # action is an int between 0 and 3 for the four draftable positions
+        print("_get_player_from_action")
         position = self.draftable_positions[action]
         player_queue = self.pos_dqs[position].players
-        if not player_queue:
+        diffs_queue = self.pos_dqs[position].diffs
+        if position not in self.pos_dqs:
+            print(f"[ERROR] pos_dqs missing for position {position}")
             return None
-        
-        player_id, _ = player_queue[0]
-        return player_id
+
+        while player_queue:
+            player_id, _ = player_queue[0]
+            if player_id in self.available_players:
+                return player_id
+            else:
+                print(f"DEBUG: Player {player_id} at top of {position} queue is not available. Removing.")
+                player_queue.popleft()
+                if diffs_queue:
+                    diffs_queue.popleft()
+        return None
 
     def _draft_player(self, agent, action, player):
+        print("_draft_player")
         # Ensure the player is valid and available
         if player not in self.available_players:
-            return False
+            print(f'player {self.gsis_to_name[player]} not available.')
+            return False, 0
         
-        succusesfull_update = self._update_team_info(agent, action, player)
-        if not succusesfull_update:
-            return False
+        succussful_update = self._update_team_info(agent, action, player)
+        if not succussful_update:
+            print('Unsuccessful update of team info')
+            return False, 0
         
         # Remove the player from available players and update draft history
         self.available_players.remove(player)
         self.draft_history.append((agent, player))
-        self._get_draft_pick_reward(agent, action)
-        return True
+        step_reward = self._get_draft_pick_reward(agent, action)
+
+        player_name = self.gsis_to_name.get(player, 'Unknown')
+        position = self.draftable_positions[action]
+        print(f"🏈 {agent} drafted {player_name} ({position}) - Reward: {step_reward:.2f}")
+        
+        return True, step_reward
     
     def _update_team_info(self, agent, action, player):
+        print("_update_team_info")
         player_pos = self.draftable_positions[action]
         player_proj = self.gsis_to_projections[player]
 
-        position_room = self.team_info[agent]['pos_counts'][player_pos] < self.position_limits[player_pos]
-        flex_room, num_excess_of_starting_players = self._flex_room(agent)
-        bench_room = (not position_room) & (not flex_room) & (num_excess_of_starting_players < (self.position_limits['BENCH'] + self.position_limits['FLEX']))
-
         # Update the team roster and positions such that position players are chosen first, then FLEX, then BENCH
         self.team_info[agent]['roster'].append(player)
-        if position_room:
-            i = self.team_info[agent]['pos_counts'][player_pos]
-            self.team_info[agent]['pos_roster'][player_pos][i] = player
-            self.team_info[agent]['pos_projections'][player_pos][i] = player_proj
-        elif flex_room:
-            i = num_excess_of_starting_players
-            self.team_info[agent]['pos_roster']['FLEX'][i] = player
-            self.team_info[agent]['pos_projections']['FLEX'][i] = player_proj
-        elif bench_room:
-            i = num_excess_of_starting_players - self.position_limits['FLEX']
-            self.team_info[agent]['pos_roster']['BENCH'][i] = player
-            self.team_info[agent]['pos_projections']['BENCH'][i] = player_proj
-        else:
-            print(f'No room left on team to draft.') # logger out?
-            return False
 
-        self.team_info[agent]['pos_counts'][player_pos] += 1
-        return True
+        success = False
+
+        current_flex_players_count = len([player for player in self.team_info[agent]['pos_roster']['FLEX'] if player is not None])
+        current_bench_players_count = len([player for player in self.team_info[agent]['pos_roster']['BENCH'] if player is not None])
+
+        if self.team_info[agent]['pos_counts'][player_pos] < self.position_limits[player_pos]:
+            idx = self.team_info[agent]['pos_counts'][player_pos]
+            self.team_info[agent]['pos_roster'][player_pos][idx] = player
+            self.team_info[agent]['pos_projections'][player_pos][idx] = player_proj
+            self.team_info[agent]['pos_counts'][player_pos] += 1
+            success = True
+
+        elif player_pos in self.flex_positions and (current_flex_players_count < self.position_limits['FLEX']):
+            idx = current_flex_players_count
+            self.team_info[agent]['pos_roster']['FLEX'][idx] = player
+            self.team_info[agent]['pos_projections']['FLEX'][idx] = player_proj
+            self.team_info[agent]['pos_counts'][player_pos] += 1
+            success = True
+
+        elif current_bench_players_count < self.position_limits['BENCH']:
+            idx = current_bench_players_count
+            self.team_info[agent]['pos_roster']['BENCH'][idx] = player
+            self.team_info[agent]['pos_projections']['BENCH'][idx] = player_proj
+            self.team_info[agent]['pos_counts'][player_pos] += 1
+            success = True
+
+        if not success:
+            print(f'No room left on team {agent} left to draft {self.gsis_to_name.get(player)} ({player_pos}). Roster full.')
+
+        return success
         
     def _advance_draft(self, action):
-        # Advance the draft to next pick
-        self.current_pick += 1
+        print(f"_advance_draft: current_pick={self.current_pick}, total_picks={self.total_picks}")
 
-        if action:
+        if action is not None:
             position = self.draftable_positions[action]
             self._update_pos_dqs(position)
 
-        if self.current_pick >= self.total_picks:
+        if self.current_pick >= self.total_picks - 1:
+            print(f"Draft complete: processed pick {self.current_pick} (final pick)")
+            self.current_pick += 1 
             self._finalize_draft()
-        else:
-            #self.agent_name_mapping = self.current_agent() 
-            self.agent_selection = self.current_agent() # Now that current pick has incremented
-            print(f'Current agent now {self.agent_selection}')
+            return
+        
+        self.current_pick += 1
+        print(f"Advanced to pick {self.current_pick}/{self.total_picks}")
+
+        next_agent = self.current_agent()
+        if next_agent is None:
+            print(f"No valid next agent found for pick {self.current_pick}, finalizing draft")
+            self._finalize_draft()
+            return
+        
+        self.agent_selection = next_agent
+        print(f'Current agent now {self.agent_selection}')
+        
+        if self.current_pick >= self.total_picks:
+            print(f"Draft completion detected after agent assignment")
+            self._finalize_draft()
 
     def _finalize_draft(self):
-        self.full_roster_df = self._get_full_roster_df()
-        optimized_scores = self.full_roster_df.groupby('agent').apply(self._get_optimized_score)
-        self.optimized_lineups = self.full_roster_df.groupby('agent').apply(self._get_optimized_lineup)
-        for agent in self.possible_agents:
-            self.terminations[agent] = True
-            self.rewards[agent] += optimized_scores[agent]
-        print(f"_finalize_draft: agents = {self.agents}")
-        print(f"_finalize_draft: possible_agents = {self.possible_agents}")
+        print("Finalizing Draft...")
+        try:
+            should_terminate = True
+            
+            try:
+                self.full_roster_df = self._get_full_roster_df()
+                if not self.full_roster_df.empty:
+                    self.optimized_lineups = self.full_roster_df.groupby('agent').apply(self._get_optimized_lineup)
+                    print("Optimized lineups calculated successfully")
+            except Exception as e:
+                print(f"Error building roster DF: {e}")
+
+            try:
+                self._calculate_final_rewards()
+                print("Final rewards calculated successfully")
+            except Exception as e:
+                print(f"Error calculating final rewards: {e}")
+                for agent in self.possible_agents:
+                    self.rewards[agent] = -100
+
+            for agent in self.possible_agents:
+                self.terminations[agent] = True
+                if not isinstance(self.infos[agent], dict):
+                    self.infos[agent] = {}
+                self.infos[agent]['draft_completed'] = True
+                
+            print(f"[FINAL] All agents terminated. Final rewards: {self.rewards}")
+            
+            self.agent_selection = None
+
+        except Exception as e:
+            print(f"Critical error in _finalize_draft: {e}")
+            for agent in self.possible_agents:
+                self.terminations[agent] = True
+                self.rewards[agent] = -100
+                if not isinstance(self.infos[agent], dict):
+                    self.infos[agent] = {}
+            self.agent_selection = None
 
     def observe(self, agent):
+        print(f"[OBSERVE] agent: {agent} | Pick: {self.current_pick}/{self.total_picks}, term={self.terminations.get(agent)} trunc={self.truncations.get(agent)}")
         if agent is None:
+            print("Observe agent is none.")
             return {}
         
-        if self.terminations[agent] or self.truncations[agent] or self.current_pick >= self.total_picks:
+        if (self.terminations.get(agent, False) or 
+                self.truncations.get(agent, False) or 
+                self.current_pick >= self.total_picks):            
             num_draftable_positions = len(self.draftable_positions)
-            return {
-                "pos_available": np.zeros(num_draftable_positions, dtype=np.int8),
-                "team_needs": np.zeros(num_draftable_positions, dtype=np.int8),
-                "next_opponent_needs": np.zeros(num_draftable_positions, dtype=np.int8),
-                "projected_pts": np.zeros(num_draftable_positions, dtype=np.float32),
-                "difference_with_replacement": np.zeros(num_draftable_positions, dtype=np.float32),
-                "hurt_score": np.zeros(num_draftable_positions, dtype=np.float32),
-                "difference_with_current_worst_starter": np.zeros(num_draftable_positions, dtype=np.float32)
-            }
+            if self.flatten_obs:
+                return np.zeros(num_draftable_positions * 8, dtype=np.float32)
+            else:
+                return {
+                    "action_mask": np.zeros(num_draftable_positions, dtype=np.int8),
+                    "pos_available": np.zeros(num_draftable_positions, dtype=np.int8),
+                    "team_needs": np.zeros(num_draftable_positions, dtype=np.int8),
+                    "next_opponent_needs": np.zeros(num_draftable_positions, dtype=np.int8),
+                    "projected_pts": np.zeros(num_draftable_positions, dtype=np.float32),
+                    "difference_with_replacement": np.zeros(num_draftable_positions, dtype=np.float32),
+                    "hurt_score": np.zeros(num_draftable_positions, dtype=np.float32),
+                    "difference_with_current_worst_starter": np.zeros(num_draftable_positions, dtype=np.float32)
+                }
         
-        return {
-                "pos_available": np.array(self._get_available_pos(), dtype=np.int8), # if no more QBs left in pool (for example) return [0, 1, 1, 1]
-                "team_needs": np.array(self._get_team_needs(agent), dtype=np.int8),
-                "next_opponent_needs": np.array(self._get_next_opponent_needs(agent), dtype=np.int8),
-                "projected_pts": np.array(self._get_top_pos_proj_pts(), dtype=np.float32),
-                "difference_with_replacement": np.array(self._get_difference_with_replacement(), dtype=np.float32),
-                "hurt_score": np.array(self._get_hurt_score(agent), dtype=np.float32),
-                "difference_with_current_worst_starter": np.array(self._get_diff_with_current_worst_starter(agent), dtype=np.float32)
+        action_mask = [self._can_draft_position(agent, pos) for pos in self.draftable_positions]
+
+        obs_dict = {
+            "action_mask": np.array(action_mask, dtype=np.int8),
+            "pos_available": np.array(self._get_available_pos(), dtype=np.int8),
+            "team_needs": np.array(self._get_team_needs(agent), dtype=np.int8),
+            "next_opponent_needs": np.array(self._get_next_opponent_needs(agent), dtype=np.int8),
+            "projected_pts": np.array(self._get_top_pos_proj_pts(), dtype=np.float32),
+            "difference_with_replacement": np.array(self._get_difference_with_replacement(), dtype=np.float32),
+            "hurt_score": np.array(self._get_hurt_score(agent), dtype=np.float32),
+            "difference_with_current_worst_starter": np.array(self._get_diff_with_current_worst_starter(agent), dtype=np.float32)
         }
+        
+        if self.flatten_obs:
+            flat_obs = np.concatenate([
+                obs_dict["action_mask"],
+                obs_dict["pos_available"],
+                obs_dict["team_needs"], 
+                obs_dict["next_opponent_needs"],
+                obs_dict["projected_pts"],
+                obs_dict["difference_with_replacement"],
+                obs_dict["hurt_score"],
+                obs_dict["difference_with_current_worst_starter"]
+            ]).astype(np.float32)
+            print(f"[OBSERVE] Flattened obs shape: {flat_obs.shape}, dtype: {flat_obs.dtype}")
+            return flat_obs
+        else:
+            return obs_dict
     
     def render(self):
-        round_num = self.current_pick // self.num_teams + (1 if self.current_pick % self.num_teams != 0 else 0)
+        round_num = self.current_pick // self.num_teams + 1
         print(f"\n--- Round {round_num} ---")       
         print(f"Current pick: {self.current_pick}, Agent: {self.agent_selection}")
         for agent in self.possible_agents:
@@ -326,6 +463,10 @@ class DraftEnvironment(AECEnv):
     
     def current_agent(self):
         if self.current_pick >= self.total_picks:
+            print(f"Draft complete: pick {self.current_pick} >= total {self.total_picks}")
+            return None
+        if self.current_pick >= len(self.draft_order):
+            print(f"Error: pick {self.current_pick} exceeds draft_order length {len(self.draft_order)}")
             return None
         agent_index = self.draft_order[self.current_pick]
         return self.possible_agents[agent_index]
@@ -352,22 +493,46 @@ class DraftEnvironment(AECEnv):
             else:
                 result.append(0)
         return result    
-    
+
+
     def _get_team_needs(self, agent):
         needs = np.zeros(len(self.draftable_positions), dtype=np.int8)
-        counts = self.team_info[agent]['pos_counts']
-
-        if counts['QB'] < self.position_limits['QB']:
-            needs[self.position_str_to_index['QB']] = 1
+        info = self.team_info[agent]
+        pos_counts = info['pos_counts']
         
-        # Determine if FLEX is already filled by how many RBs, WRs, and TEs we have
-        flex_room, _ = self._flex_room(agent)
-
+        if pos_counts['QB'] < self.position_limits['QB']:
+            needs[self.position_str_to_index['QB']] = 1
+            
+        current_flex_players_count = len([p for p in info['pos_roster']['FLEX'] if p is not None])
+        has_flex_room = current_flex_players_count < self.position_limits['FLEX']
+        
         for pos in self.flex_positions:
-            has_pos_need = counts[pos] < self.position_limits[pos]
-            if has_pos_need or flex_room:
+            has_dedicated_room = pos_counts[pos] < self.position_limits[pos]
+            
+            if has_dedicated_room or has_flex_room:
                 needs[self.position_str_to_index[pos]] = 1
+                
         return needs
+
+    def _can_draft_position(self, agent, pos):
+        info = self.team_info[agent]
+        
+        if len(info['roster']) >= self.full_team_number:
+            return False
+
+        if info['pos_counts'][pos] < self.position_limits[pos]:
+            return True
+
+        if pos in self.flex_positions:
+            current_flex_players = [p for p in info['pos_roster']['FLEX'] if p is not None]
+            if len(current_flex_players) < self.position_limits['FLEX']:
+                return True
+
+        current_bench_players = [p for p in info['pos_roster']['BENCH'] if p is not None]
+        if len(current_bench_players) < self.position_limits['BENCH']:
+            return True
+
+        return False
 
     def _flex_room(self, agent):
         excess_pos = sum([max(0, self.team_info[agent]['pos_counts'][pos] - self.position_limits[pos]) for pos in self.flex_positions])
@@ -394,13 +559,25 @@ class DraftEnvironment(AECEnv):
         top_pts = self._get_top_pos_proj_pts()
         agent_roster_worst_pos = []
         flex_room, _ = self._flex_room(agent)
+        
         if not flex_room and len(self.team_info[agent]['pos_projections']['FLEX']) > 0:
-            min_flex_proj_pts = min([proj for proj in self.team_info[agent]['pos_projections']['FLEX']])
-            agent_roster_worst_pos = [min(self.team_info[agent]['pos_projections']['QB']), min_flex_proj_pts, min_flex_proj_pts, min_flex_proj_pts]
+            flex_projections = [proj for proj in self.team_info[agent]['pos_projections']['FLEX'] if proj > 0]
+            if flex_projections:
+                min_flex_proj_pts = min(flex_projections)
+            else:
+                min_flex_proj_pts = 0
+            
+            qb_projections = [proj for proj in self.team_info[agent]['pos_projections']['QB'] if proj > 0]
+            min_qb_proj = min(qb_projections) if qb_projections else 0
+            
+            agent_roster_worst_pos = [min_qb_proj, min_flex_proj_pts, min_flex_proj_pts, min_flex_proj_pts]
         else:
             for pos in self.draftable_positions:
-                agent_roster_worst_pos.append(min(self.team_info[agent]['pos_projections'][pos]))
-        return np.array(self._get_top_pos_proj_pts()) - np.array(agent_roster_worst_pos)
+                pos_projections = [proj for proj in self.team_info[agent]['pos_projections'][pos] if proj > 0]
+                min_proj = min(pos_projections) if pos_projections else 0
+                agent_roster_worst_pos.append(min_proj)
+        
+        return np.array(top_pts) - np.array(agent_roster_worst_pos)
 
     def _get_draft_order(self):
         draft_order = []
@@ -416,42 +593,160 @@ class DraftEnvironment(AECEnv):
         return draft_order
 
     def _get_full_roster_df(self):
-        rows = []
-        for agent in self.agents:
-            for gsis_id in self.team_info[agent]['roster']:
-                rows.append({"agent": agent, "gsis_id": gsis_id})
-        roster_df = pd.DataFrame(rows)
-        print(f'ROSTER DF: {roster_df}')
-        return roster_df.merge(self.player_df[["gsis_id", "player_name", "position", "fantasy_pts"]], on="gsis_id", how="left")
+        try:
+            rows = []
+            for agent in self.agents:
+                for gsis_id in self.team_info[agent]['roster']:
+                    rows.append({"agent": agent, "gsis_id": gsis_id})
+            
+            if not rows:
+                print("Warning: No roster data to create DataFrame")
+                return pd.DataFrame()
+                
+            roster_df = pd.DataFrame(rows)
+            
+            required_cols = ["gsis_id", "player_name", "position", "fantasy_pts"]
+            available_cols = [col for col in required_cols if col in self.player_df.columns]
+            
+            if "fantasy_pts" not in available_cols:
+                if "median_prediction" in self.player_df.columns:
+                    temp_df = self.player_df.copy()
+                    temp_df["fantasy_pts"] = temp_df["median_prediction"]
+                    available_cols.append("fantasy_pts")
+                else:
+                    print("Warning: No fantasy_pts or median_prediction column found")
+                    return roster_df
+            
+            return roster_df.merge(
+                self.player_df[available_cols], 
+                on="gsis_id", 
+                how="left"
+            )
+            
+        except Exception as e:
+            print(f"Error in _get_full_roster_df: {e}")
+            return pd.DataFrame()
     
     def _get_optimized_lineup(self, df):
-        #real_scores = self.real_scores
-        # Add here logic for taking samples from posterior if real_scores = False
-        lineup = []
-        for pos, limit in self.position_limits.items():
-            if pos not in ['FLEX', 'BENCH']:
-                top_players = df[df['position']==pos].nlargest(limit, 'fantasy_pts')
-                lineup.append(top_players)
-        
-        used_ids = pd.concat(lineup)['gsis_id']
-        
-        flex_pool = df[(df['position'].isin(["RB", "WR", "TE"])) & (~df['gsis_id'].isin(used_ids))]
-        lineup.append(flex_pool.nlargest(self.position_limits['FLEX'], 'fantasy_pts'))
-        return pd.concat(lineup)
+        try:
+            if df.empty:
+                return pd.DataFrame()
+                
+            lineup = []
+            for pos, limit in self.position_limits.items():
+                if pos not in ['FLEX', 'BENCH']:
+                    pos_players = df[df['position'] == pos]
+                    if not pos_players.empty:
+                        top_players = pos_players.nlargest(min(limit, len(pos_players)), 'fantasy_pts')
+                        lineup.append(top_players)
+            
+            if lineup:
+                used_ids = pd.concat(lineup)['gsis_id'].tolist()
+            else:
+                used_ids = []
+  
+            flex_pool = df[(df['position'].isin(self.flex_positions)) & (~df['gsis_id'].isin(used_ids))]
+            if not flex_pool.empty and self.position_limits.get('FLEX', 0) > 0:
+                flex_players = flex_pool.nlargest(min(self.position_limits['FLEX'], len(flex_pool)), 'fantasy_pts')
+                lineup.append(flex_players)
+            
+            return pd.concat(lineup) if lineup else pd.DataFrame()
+            
+        except Exception as e:
+            print(f"Error in _get_optimized_lineup: {e}")
+            return pd.DataFrame()
     
     def _get_optimized_score(self, df):
         lineup = self._get_optimized_lineup(df)
         return lineup['fantasy_pts'].sum()
     
+    def _calculate_final_rewards(self):
+        if self.full_roster_df is None or len(self.full_roster_df) == 0:
+            print("Warning: No roster data available for final rewards")
+            for agent in self.agents:
+                self.rewards[agent] += -50
+                self._cumulative_rewards[agent] += -50
+            return
+        
+        try:
+            final_scores = {}
+            for agent in self.agents:
+                agent_df = self.full_roster_df[self.full_roster_df['agent'] == agent]
+                if len(agent_df) > 0:
+                    final_scores[agent] = self._get_optimized_score(agent_df)
+                else:
+                    final_scores[agent] = 0
+                    print(f"Warning: No players found for {agent}")
+            
+            if not final_scores:
+                return
+                
+            max_score = max(final_scores.values())
+            
+            for agent in self.agents:
+                agent_score = final_scores.get(agent, 0)
+                relative_reward = (agent_score - max_score) * 2
+                
+                if agent_score == max_score:
+                    relative_reward += 100
+                
+                self.rewards[agent] += relative_reward
+                self._cumulative_rewards[agent] += relative_reward
+                
+                self.infos[agent].update({
+                    'final_score': agent_score,
+                    'max_score': max_score,
+                    'relative_reward': relative_reward,
+                    'won_draft': agent_score == max_score,
+                    'cumulative_reward': self._cumulative_rewards[agent]
+                })
+                
+            print(f"Final scores: {final_scores}")
+            print(f"Final cumulative rewards: {self._cumulative_rewards}")
+            
+        except Exception as e:
+            print(f"Error calculating final rewards: {e}")
+            for agent in self.agents:
+                self.rewards[agent] += -100
+                self._cumulative_rewards[agent] += -100
+
     
     def _get_draft_pick_reward(self, agent, action):
         # Value Over Replacement + Hurt Score
         value_over_replacement = self._get_difference_with_replacement()[action]
         hurt_score = self._get_hurt_score(agent)[action]
-        in_draft_reward = value_over_replacement + hurt_score
-        self.rewards[agent] += in_draft_reward
 
-           
+
+        prev_round = self.current_pick // self.num_teams
+        round_multiplier = max(0.5, 1-(prev_round)*0.05)
+
+        in_draft_reward = round_multiplier * (value_over_replacement + hurt_score)
+        print(f"[REWARD DEBUG] Agent: {agent}, Pick: {self.current_pick}")
+        print(f"  Value over replacement: {value_over_replacement:.2f}")
+        print(f"  Hurt score: {hurt_score:.2f}")
+        print(f"  Round multiplier: {round_multiplier:.2f}")
+        print(f"  Total reward: {in_draft_reward:.2f}")
+
+        self.draft_pick_reward_values[f'{agent}_{self.current_pick}'] = {
+            "value_over_replacement": value_over_replacement,
+            "hurt_score": hurt_score,
+            "round_multiplier": round_multiplier,
+            "total_in_draft_reqard": in_draft_reward
+        }
+        print("value_over_replacement:", value_over_replacement)
+        print("hurt_score:", hurt_score)
+        print("round_multiplier:", round_multiplier)
+
+        #self.rewards[agent] += in_draft_reward
+
+        #if not hasattr(self, '_cumulative_rewards'):
+        #    self._cumulative_rewards = {agent: 0.0 for agent in self.agents}
+        #self._cumulative_rewards[agent] += in_draft_reward
+        #print(f"[REWARD] Step reward: {in_draft_reward}, Cumulative: {self._cumulative_rewards[agent]}")
+
+        return in_draft_reward
+
+
 
     """
     def _get_named_team_positions_roster(self):
