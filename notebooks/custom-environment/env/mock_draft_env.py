@@ -14,7 +14,7 @@ class PositionDQ:
      players: Deque[Tuple[str, float]]
      diffs: Deque[float]
 
-class DraftEnvironment(AECEnv):
+class MockDraftEnvironment(AECEnv):
     metadata = {
         "name": "custom_environment_v0",
         "is_parallelizable": True,
@@ -22,11 +22,13 @@ class DraftEnvironment(AECEnv):
         "render_fps": 30
     }
 
-    def __init__(self, player_df:pd.DataFrame, num_teams=2, draft_type=None, rounds=14, random_pool_size=100, real_scores_at_draft_end=False, render_mode=None, flatten_obs=False):
+    def __init__(self, player_df:pd.DataFrame, num_teams=2, draft_type=None, rounds=14, random_pool_size=100, real_scores_at_draft_end=False, render_mode=None, flatten_obs=False, your_team_id=0):
         super().__init__()
 
         self.render_mode = render_mode
         self.flatten_obs = flatten_obs
+
+        self.your_team_id = your_team_id # Human team
         
         self.player_df = player_df
         self.random_pool_size = random_pool_size
@@ -57,7 +59,6 @@ class DraftEnvironment(AECEnv):
 
         self.position_str_to_index = {pos: i for i, pos in enumerate(self.draftable_positions)}
 
-        # Draft tracking
         self.draft_order = self._get_draft_order()
 
         self.invalid_action_penalty = -50
@@ -186,7 +187,6 @@ class DraftEnvironment(AECEnv):
 
 
     def step(self, action):
-        print("step")
         if self.agent_selection is None:
             return
 
@@ -280,6 +280,7 @@ class DraftEnvironment(AECEnv):
         player_proj = self.gsis_to_projections[player]
 
         # Update the team roster and positions such that position players are chosen first, then FLEX, then BENCH
+
         success = False
 
         current_flex_players_count = len([player for player in self.team_info[agent]['pos_roster']['FLEX'] if player is not None])
@@ -315,50 +316,49 @@ class DraftEnvironment(AECEnv):
         return success
         
     def _advance_draft(self, action):
-        print(f"_advance_draft: current_pick={self.current_pick}, total_picks={self.total_picks}")
+        #print(f"_advance_draft: current_pick={self.current_pick}, total_picks={self.total_picks}")
 
         if action is not None:
             position = self.draftable_positions[action]
             self._update_pos_dqs(position)
 
         if self.current_pick >= self.total_picks - 1:
-            print(f"Draft complete: processed pick {self.current_pick} (final pick)")
+            #print(f"Draft complete: processed pick {self.current_pick} (final pick)")
             self.current_pick += 1 
             self._finalize_draft()
             return
         
         self.current_pick += 1
-        print(f"Advanced to pick {self.current_pick}/{self.total_picks}")
+        #print(f"Advanced to pick {self.current_pick}/{self.total_picks}")
 
         next_agent = self.current_agent()
         if next_agent is None:
-            print(f"No valid next agent found for pick {self.current_pick}, finalizing draft")
+            #print(f"No valid next agent found for pick {self.current_pick}, finalizing draft")
             self._finalize_draft()
             return
         
         self.agent_selection = next_agent
-        print(f'Current agent now {self.agent_selection}')
+        #print(f'Current agent now {self.agent_selection}')
         
         if self.current_pick >= self.total_picks:
-            print(f"Draft completion detected after agent assignment")
+            #print(f"Draft completion detected after agent assignment")
             self._finalize_draft()
 
     def _finalize_draft(self):
-        print("Finalizing Draft...")
         try:
-            should_terminate = True
+            should_terminate = True # Can remove?
             
             try:
                 self.full_roster_df = self._get_full_roster_df()
                 if not self.full_roster_df.empty:
                     self.optimized_lineups = self.full_roster_df.groupby('agent').apply(self._get_optimized_lineup)
-                    print("Optimized lineups calculated successfully")
+                    #print("Optimized lineups calculated successfully")
             except Exception as e:
                 print(f"Error building roster DF: {e}")
 
             try:
                 self._calculate_final_rewards()
-                print("Final rewards calculated successfully")
+                #print("Final rewards calculated successfully")
             except Exception as e:
                 print(f"Error calculating final rewards: {e}")
                 for agent in self.possible_agents:
@@ -384,7 +384,7 @@ class DraftEnvironment(AECEnv):
             self.agent_selection = None
 
     def observe(self, agent):
-        print(f"[OBSERVE] agent: {agent} | Pick: {self.current_pick}/{self.total_picks}, term={self.terminations.get(agent)} trunc={self.truncations.get(agent)}")
+        #print(f"[OBSERVE] agent: {agent} | Pick: {self.current_pick}/{self.total_picks}, term={self.terminations.get(agent)} trunc={self.truncations.get(agent)}")
         if agent is None:
             print("Observe agent is none.")
             return {}
