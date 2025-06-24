@@ -23,7 +23,6 @@ class DraftEnvironment(AECEnv):
     }
 
     def __init__(self, player_df:pd.DataFrame, num_teams=2, draft_type=None, rounds=14, random_pool_size=100, real_scores_at_draft_end=False, render_mode=None, flatten_obs=False):
-        print("Initializing DraftEnvironment")
         super().__init__()
 
         self.render_mode = render_mode
@@ -62,10 +61,8 @@ class DraftEnvironment(AECEnv):
         self.draft_order = self._get_draft_order()
 
         self.invalid_action_penalty = -50
-        print("Finished Initializing DraftEnvironment")
 
     def _initialize_player_metadata(self):
-        print("_initialize_player_metadata")
         self.player_pool_df = self.player_df.sample(
             n=min(self.random_pool_size, len(self.player_df)), 
             random_state=np.random.randint(0, 10000)
@@ -102,7 +99,6 @@ class DraftEnvironment(AECEnv):
                                 reverse=True))
     
     def _create_diffs_dq(self, pos_dq):
-        print("_create_diffs_dq")
         if not pos_dq:
             return deque()
         dq = [proj_pts for _, proj_pts in pos_dq]
@@ -110,7 +106,6 @@ class DraftEnvironment(AECEnv):
         return deque([a - b for a, b in zip(dq, dq[1:])])
     
     def _update_pos_dqs(self, pos):
-        print("_update_pos_dqs")
         if len(self.pos_dqs[pos].players) > 0:
             self.pos_dqs[pos].players.popleft()
         if len(self.pos_dqs[pos].diffs) > 0:
@@ -118,7 +113,6 @@ class DraftEnvironment(AECEnv):
         # What happens when these cannot execute?
 
     def _initialize_spaces(self):
-        print("_initialize_spaces")
         num_draftable_positions = 4
         
         if self.flatten_obs:
@@ -146,14 +140,13 @@ class DraftEnvironment(AECEnv):
         }
 
     def _initialize_agents(self):
-        print("_initialize_agents")
         self.possible_agents = [f"team_{i}" for i in range(self.num_teams)]
         self.agents = self.possible_agents[:]
         self.agent_name_mapping = {agent: i for i, agent in enumerate(self.possible_agents)}
 
 
     def reset(self, seed=None, options=None):
-        print("Reset")
+        print("RESET")
         if seed is not None:
             np.random.seed(seed)
     
@@ -162,10 +155,6 @@ class DraftEnvironment(AECEnv):
         self.agents = self.possible_agents[:]
         
         self._initialize_player_metadata()
-
-        print("-" * 50)
-        print(f"PLAYER POOL DF HEAD: {self.player_pool_df.head()}")
-        print("-" * 50)
         
         # Collect all available players
         self.available_players = self.player_pool.copy()
@@ -281,7 +270,7 @@ class DraftEnvironment(AECEnv):
 
         player_name = self.gsis_to_name.get(player, 'Unknown')
         position = self.draftable_positions[action]
-        print(f"🏈 {agent} drafted {player_name} ({position}) - Reward: {step_reward:.2f}")
+        print(f"{agent} drafted {player_name} ({position}) - Reward: {step_reward:.2f}")
         
         return True, step_reward
     
