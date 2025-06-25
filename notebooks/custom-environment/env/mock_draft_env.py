@@ -88,7 +88,6 @@ class MockDraftEnvironment(AECEnv):
              self.pos_dqs[pos] = PositionDQ(players=player_id_and_projections, diffs=diffs)
 
     def _sort_and_create_dq(self, pos):
-        print("_sort_and_create_dq")
         if pos not in self.draftable_positions:
                 raise ValueError(f"{pos} not in possible starting positions: {self.draftable_positions}")
         
@@ -147,7 +146,6 @@ class MockDraftEnvironment(AECEnv):
 
 
     def reset(self, seed=None, options=None):
-        print("RESET")
         if seed is not None:
             np.random.seed(seed)
     
@@ -211,7 +209,7 @@ class MockDraftEnvironment(AECEnv):
             draft_successfull, step_reward = self._draft_player(agent, action, player)
             if draft_successfull:
                 self.rewards[agent] = step_reward
-                print(f"[DEBUG] Reward assigned to {agent}: {self.rewards}")
+                #print(f"[DEBUG] Reward assigned to {agent}: {self.rewards}")
                 self._advance_draft(action)
             else:
                 print(f"[Invalid Pick (Game Logic)] {agent} attempted invalid selection (action={action}). Penalizing and skipping turn.")
@@ -227,12 +225,10 @@ class MockDraftEnvironment(AECEnv):
             self._advance_draft(None)
 
     def _was_dead_step(self, action):
-        print("_was_dead_step")
         if self.current_pick < self.total_picks:
             self._advance_draft(None)
 
     def _get_player_from_action(self, action):
-        print("_get_player_from_action")
         position = self.draftable_positions[action]
         player_queue = self.pos_dqs[position].players
         diffs_queue = self.pos_dqs[position].diffs
@@ -252,7 +248,6 @@ class MockDraftEnvironment(AECEnv):
         return None
 
     def _draft_player(self, agent, action, player):
-        print("_draft_player")
         # Ensure the player is valid and available
         if player not in self.available_players:
             print(f'player {self.gsis_to_name[player]} not available.')
@@ -270,12 +265,11 @@ class MockDraftEnvironment(AECEnv):
 
         player_name = self.gsis_to_name.get(player, 'Unknown')
         position = self.draftable_positions[action]
-        print(f"{agent} drafted {player_name} ({position}) - Reward: {step_reward:.2f}")
+        #print(f"{agent} drafted {player_name} ({position}) - Reward: {step_reward:.2f}")
         
         return True, step_reward
     
     def _update_team_info(self, agent, action, player):
-        print("_update_team_info")
         player_pos = self.draftable_positions[action]
         player_proj = self.gsis_to_projections[player]
 
@@ -333,7 +327,7 @@ class MockDraftEnvironment(AECEnv):
 
         next_agent = self.current_agent()
         if next_agent is None:
-            #print(f"No valid next agent found for pick {self.current_pick}, finalizing draft")
+            print(f"No valid next agent found for pick {self.current_pick}, finalizing draft")
             self._finalize_draft()
             return
         
@@ -396,16 +390,7 @@ class MockDraftEnvironment(AECEnv):
             if self.flatten_obs:
                 return np.zeros(num_draftable_positions * 8, dtype=np.float32)
             else:
-                return {
-                    "action_mask": np.zeros(num_draftable_positions, dtype=np.int8),
-                    "pos_available": np.zeros(num_draftable_positions, dtype=np.int8),
-                    "team_needs": np.zeros(num_draftable_positions, dtype=np.int8),
-                    "next_opponent_needs": np.zeros(num_draftable_positions, dtype=np.int8),
-                    "projected_pts": np.zeros(num_draftable_positions, dtype=np.float32),
-                    "difference_with_replacement": np.zeros(num_draftable_positions, dtype=np.float32),
-                    "hurt_score": np.zeros(num_draftable_positions, dtype=np.float32),
-                    "difference_with_current_worst_starter": np.zeros(num_draftable_positions, dtype=np.float32)
-                }
+                return
         
         action_mask = [self._can_draft_position(agent, pos) for pos in self.draftable_positions]
 
@@ -431,7 +416,7 @@ class MockDraftEnvironment(AECEnv):
                 obs_dict["hurt_score"],
                 obs_dict["difference_with_current_worst_starter"]
             ]).astype(np.float32)
-            print(f"[OBSERVE] Flattened obs shape: {flat_obs.shape}, dtype: {flat_obs.dtype}")
+            #print(f"[OBSERVE] Flattened obs shape: {flat_obs.shape}, dtype: {flat_obs.dtype}")
             return flat_obs
         else:
             return obs_dict
@@ -453,7 +438,7 @@ class MockDraftEnvironment(AECEnv):
     
     def current_agent(self):
         if self.current_pick >= self.total_picks:
-            print(f"Draft complete: pick {self.current_pick} >= total {self.total_picks}")
+            #print(f"Draft complete: pick {self.current_pick} >= total {self.total_picks}")
             return None
         if self.current_pick >= len(self.draft_order):
             print(f"Error: pick {self.current_pick} exceeds draft_order length {len(self.draft_order)}")
@@ -597,16 +582,10 @@ class MockDraftEnvironment(AECEnv):
             
             required_cols = ["gsis_id", "player_name", "position", "fantasy_pts"]
             available_cols = [col for col in required_cols if col in self.player_df.columns]
-            
-            if "fantasy_pts" not in available_cols:
-                if "median_prediction" in self.player_df.columns:
-                    temp_df = self.player_df.copy()
-                    temp_df["fantasy_pts"] = temp_df["median_prediction"]
-                    available_cols.append("fantasy_pts")
-                else:
-                    print("Warning: No fantasy_pts or median_prediction column found")
-                    return roster_df
-            
+
+            temp_df = self.player_df.copy()
+            temp_df["fantasy_pts"] = temp_df["median_prediction"]
+
             return roster_df.merge(
                 self.player_df[available_cols], 
                 on="gsis_id", 
@@ -691,8 +670,8 @@ class MockDraftEnvironment(AECEnv):
                     'cumulative_reward': self._cumulative_rewards[agent]
                 })
                 
-            print(f"Final scores: {final_scores}")
-            print(f"Final cumulative rewards: {self._cumulative_rewards}")
+            #print(f"Final scores: {final_scores}")
+            #print(f"Final cumulative rewards: {self._cumulative_rewards}")
             
         except Exception as e:
             print(f"Error calculating final rewards: {e}")
@@ -711,11 +690,11 @@ class MockDraftEnvironment(AECEnv):
         round_multiplier = max(0.5, 1-(prev_round)*0.05)
 
         in_draft_reward = round_multiplier * (value_over_replacement + hurt_score)
-        print(f"[REWARD DEBUG] Agent: {agent}, Pick: {self.current_pick}")
-        print(f"  Value over replacement: {value_over_replacement:.2f}")
-        print(f"  Hurt score: {hurt_score:.2f}")
-        print(f"  Round multiplier: {round_multiplier:.2f}")
-        print(f"  Total reward: {in_draft_reward:.2f}")
+        #print(f"[REWARD DEBUG] Agent: {agent}, Pick: {self.current_pick}")
+        #print(f"  Value over replacement: {value_over_replacement:.2f}")
+        #print(f"  Hurt score: {hurt_score:.2f}")
+        #print(f"  Round multiplier: {round_multiplier:.2f}")
+        #print(f"  Total reward: {in_draft_reward:.2f}")
 
         self.draft_pick_reward_values[f'{agent}_{self.current_pick}'] = {
             "value_over_replacement": value_over_replacement,
@@ -723,16 +702,9 @@ class MockDraftEnvironment(AECEnv):
             "round_multiplier": round_multiplier,
             "total_in_draft_reqard": in_draft_reward
         }
-        print("value_over_replacement:", value_over_replacement)
-        print("hurt_score:", hurt_score)
-        print("round_multiplier:", round_multiplier)
-
-        #self.rewards[agent] += in_draft_reward
-
-        #if not hasattr(self, '_cumulative_rewards'):
-        #    self._cumulative_rewards = {agent: 0.0 for agent in self.agents}
-        #self._cumulative_rewards[agent] += in_draft_reward
-        #print(f"[REWARD] Step reward: {in_draft_reward}, Cumulative: {self._cumulative_rewards[agent]}")
+        #print("value_over_replacement:", value_over_replacement)
+        #print("hurt_score:", hurt_score)
+        #print("round_multiplier:", round_multiplier)
 
         return in_draft_reward
 
