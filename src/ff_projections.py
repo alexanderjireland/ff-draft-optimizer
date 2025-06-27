@@ -71,7 +71,7 @@ def create_X_y_train_test(pm_train_df, pm_test_df, cols_to_drop=['season', 'gsis
         ('imputer', KNNImputer()),
         ('scaler', StandardScaler()),
         ('poly', PolynomialFeatures(degree=2, include_bias=False)), # Adding polynomial features helps capture non-linear relationships
-        # PCA to reduce dimensionality added from polynomial features
+        ('pca', PCA(n_components=0.95))# PCA to reduce dimensionality added from polynomial features
     ])
 
     # Should attempt training without PCA when compute time available

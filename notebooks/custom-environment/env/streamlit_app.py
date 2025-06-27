@@ -4,6 +4,10 @@ from streamlit_extras.let_it_rain import rain
 import pandas as pd
 import time
 import numpy as np
+import pymc as pm
+import arviz as az
+import json
+import seaborn as sns
 import ray
 from ray import tune
 from ray.rllib.algorithms.ppo import PPOConfig
@@ -15,6 +19,10 @@ import pickle
 import gymnasium as spaces
 from ray.rllib.env.env_context import EnvContext
 from mock_draft_env import MockDraftEnvironment
+import sys
+sys.path.append("../../../src")
+import ff_projections
+
 
 class DraftEnvironmentWrapper(MultiAgentEnv):
     def __init__(self, config):
@@ -278,6 +286,77 @@ def setup_ray_and_load_model():
     
     return algo, policy, test_df_ref
 
+#------------------------------------- Bayesian Regresion --------------------------------
+    
+def predict_player(i, trace, X_test, y_test, index_dict, plot=False):
+    """Predicts and visualizes the posterior distribution of fantasy points for a single player.
+
+    Args:
+        i (int): Index of the player in the test set.
+        trace (arviz.InferenceData): Posterior samples trace from PyMC model.
+        X_test (pd.DataFrame): Test feature DataFrame.
+        y_test (pd.DataFrame): True fantasy points for test set.
+        plot (bool): Whether to display a histogram of the posterior predictive distribution.
+
+    Returns:
+        None
+    """
+    def create_credible_interval(posterior_pred_samples, interval_size):
+        begin = (100 - interval_size)/2
+        return np.percentile(posterior_pred_samples, [begin, (100-begin)])
+
+    # Identify the player features and true fantasy points for the i-th player in the test set
+    player_features = X_test.iloc[int(i)]
+    print(player_features)
+    print(y_test.iloc[int(i)])
+
+    # Extract the posterior samples from the trace
+    intercept_samples = trace.posterior["intercept"].values.flatten()
+    betas_samples = trace.posterior["betas"].values
+    sigma_samples = trace.posterior["sigma"].values.flatten()
+
+    # Reshape the betas_samples to match the player features
+    n_chains, n_draws, n_features = betas_samples.shape
+    betas_samples = betas_samples.reshape(n_chains * n_draws, n_features)
+
+    # Calculate the posterior predictive distribution
+    mu_samples = intercept_samples + np.dot(betas_samples, player_features)
+
+    # Take mean and std of the posterior predictive distribution to create samples
+    posterior_pred_samples = np.random.normal(mu_samples, sigma_samples)
+
+    # Calculate statistics from the posterior predictive samples
+    projected_median = np.median(posterior_pred_samples)
+    credible_interval_95 = create_credible_interval(posterior_pred_samples, 95)
+    credible_interval_90 = create_credible_interval(posterior_pred_samples, 90)
+    credible_interval_85 = create_credible_interval(posterior_pred_samples, 85)
+    credible_interval_75 = create_credible_interval(posterior_pred_samples, 75)
+    credible_interval_50 = create_credible_interval(posterior_pred_samples, 50)
+    prob_gt_200 = np.mean(posterior_pred_samples > 200)
+
+    player_id = index_dict[str(i)]
+    print(f"player_id: {player_id}")
+    player_name = st.session_state.env.env.gsis_to_name.get(player_id)
+    print(f"player_name: {player_name}")
+
+    # Plot posterior predictive distribution
+    fig = plt.figure(figsize=(10, 6))
+    ax = fig.add_subplot(111) # Add a subplot to the figure (or you can use plt.subplots for convenience)
+
+    sns.histplot(posterior_pred_samples, bins=50, kde=True, color="skyblue", ax=ax)
+    ax.axvline(projected_median, color="red", linestyle="--", label=f"Median: {projected_median:.1f}")
+    ax.axvline(200, color="green", linestyle=":", label="200-point threshold")
+    ax.set_title(f"Posterior Predictive Distribution for {player_name}")
+    ax.set_xlabel("Predicted Season Points")
+    ax.set_ylabel("Density")
+    ax.legend()
+    ax.grid(True)
+
+    # Optional: Display the plot
+    if plot:
+        plt.show()
+    
+    return fig
 
 #------------------------------------- Draft Loop -------------------------------------
 
@@ -305,7 +384,7 @@ with st.sidebar:
     st.session_state.get_actual_team = {name: team for team, name in st.session_state.teams_dict.items()}
     HUMAN_TEAM_DISPLAY = st.pills("Pick your team", list(st.session_state.teams_dict.values()), default="Team 0")
     HUMAN_TEAM = st.session_state.get_actual_team.get(HUMAN_TEAM_DISPLAY)
-    DRAFT_TYPE = st.pills("Draft Type", ["Snake", "Linear"], default="Linear", help="The draft order reverse each round in a snake draft, while the order remains the same in a linear draft.")
+    DRAFT_TYPE = st.pills("Draft Type", ["Snake", "Linear"], default="Linear", help="The draft order reverses each round in a snake draft, while the order remains the same in a linear draft.")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -345,10 +424,17 @@ if st.session_state.draft_started:
         st.session_state.env_initialized = True
         st.session_state.map_col_names = {'player_name': 'Player Name', 'position': 'Position', 'projected_pts':"Projected Points", "fantasy_pts":"Total Fantasy Points (2024)"}
 
+        st.session_state.trace = az.from_netcdf("bayesian_regression_model/full_send_model_06_03.nc")
+        st.session_state.X_test = pd.read_csv("bayesian_regression_model/X_test_06_26.csv", index_col=0)
+        st.session_state.y_test = pd.read_csv("bayesian_regression_model/y_test_06_26.csv")
+        with open("bayesian_regression_model/index_to_playerid_dict.json", 'r') as f:
+            st.session_state.index_dict = json.load(f)
+        st.session_state.reverse_index_dict = {value: key for key, value in st.session_state.index_dict.items()}
+        st.session_state.pm_test = pd.read_csv("bayesian_regression_model/pm_test_06_26.csv")
+
     # Display the available player pool
     with st.expander("Draft Player Pool", expanded=False):
         st.dataframe(st.session_state.env.env.player_pool_df[['position', 'player_name']].sort_values('position').rename(columns=st.session_state.map_col_names), hide_index=True)
-
     # Add draft board? Displaying rosters...
     st.header("Draft Board")
     max_roster = st.session_state.ROUNDS
@@ -405,8 +491,13 @@ if st.session_state.draft_started:
                     player_id = st.session_state.env.env._get_player_from_action(action_to_take)
                     player_name = st.session_state.env.env.gsis_to_name.get(player_id, "N/A")
                     st.success(f"You drafted {player_name}.")
-                    time.sleep(0.5)
-                    
+
+                    # Obviously move this elsewhere but it works!
+                    player_idx = st.session_state.reverse_index_dict.get(player_id)
+                    fig = predict_player(player_idx, st.session_state.trace, st.session_state.X_test, st.session_state.y_test, st.session_state.index_dict)
+                    st.pyplot(fig)
+                    time.sleep(5)
+                                    
                     st.session_state.env.env.step(action_to_take)
                     st.session_state.step += 1
                     st.rerun()
