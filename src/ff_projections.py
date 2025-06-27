@@ -64,6 +64,9 @@ def create_X_y_train_test(pm_train_df, pm_test_df, cols_to_drop=['season', 'gsis
     X_test = pm_test_df.drop(columns=cols_to_drop)
     y_test = pm_test_df[['fantasy_pts']]
 
+    X_train_index = pm_train_df.index
+    X_test_index = pm_test_df.index
+
     preprocessing_pipeline = Pipeline([
         ('imputer', KNNImputer()),
         ('scaler', StandardScaler()),
@@ -78,7 +81,7 @@ def create_X_y_train_test(pm_train_df, pm_test_df, cols_to_drop=['season', 'gsis
     X_train = preprocessing_pipeline.fit_transform(X_train)
     X_test = preprocessing_pipeline.transform(X_test)
 
-    return X_train, y_train, X_test, y_test
+    return X_train, y_train, X_test, y_test, X_train_index, X_test_index
 
 def logistic_regression_target_threshold(X_train, y_train, X_test, y_test, threshold=83.125):
     """Trains a logistic regression model to classify players as draftable or not.
@@ -148,7 +151,7 @@ def add_is_draftable_column(X_train, y_train, X_test, y_test, threshold=83.125):
 
     return X_train, X_test
 
-def run_pm_model(X_train, y_train, filepath):
+def run_pm_model(X_train, y_train, filepath, train_indices):
     """Fits a Bayesian linear regression model using PyMC to estimate fantasy point distributions.
 
     Provides a probabilistic framework to model uncertainty in player fantasy point projections.
@@ -156,13 +159,14 @@ def run_pm_model(X_train, y_train, filepath):
     Args:
         X_train (np.ndarray): Preprocessed training feature matrix.
         y_train (np.ndarray): Training targets.
+        filepath (str): Path to the original data file.
+        train_indices: Indices for training data.
 
     Returns:
         arviz.InferenceData: Trace object containing posterior samples.
     """
 
     real_df = pd.read_csv(filepath)
-    # Begin by fitting a linear regression model to get initial estimates of priors
     print("Fitting initial linear regression model to get priors...")
     lr = LinearRegression()
     lr.fit(X_train, y_train)
@@ -176,44 +180,56 @@ def run_pm_model(X_train, y_train, filepath):
     print(f"Mean of intercept: {intercept_mean}")
     print(f"Standard deviation of residuals: {sigma_est}")
 
+    print(f"X_train shape: {X_train.shape}")
+    print(f"y_train shape: {y_train.shape}")
+    print(f"train_indices shape: {train_indices.shape}")
+
     # Ensure X_train and y_train are in the proper format
-    df = pd.DataFrame(X_train)
-    df["target"] = y_train.values
-    df["position"] = real_df.loc[X_train.index, "position"].values
+    real_df_subset = real_df.loc[train_indices].reset_index(drop=True)
+    df = pd.DataFrame(X_train, columns=[f"f{i}" for i in range(X_train.shape[1])])
+    df["target"] = y_train.values.flatten()
+    df["position"] = real_df_subset["position"].values
 
     df_clean = df.dropna()
 
-    position_idx = df_clean['position'].astype('category').cat.codes.values
-    X_pm_train = df_clean.drop("target", axis=1).values
+    positions = df_clean['position'].astype('category')
+    position_names = positions.cat.categories
+    position_idx = positions.cat.codes.values
+    n_positions = len(position_names)
+    
+    X_pm_train = df_clean.drop(["target", "position"], axis=1).values
     y_pm_train = df_clean["target"].values
+    n_features = X_pm_train.shape[1]
 
-    # Obtain feature names for the model (when using PCA, not all that helpful)
-    feature_names = df_clean.drop("target", axis=1).columns.tolist()
-    print(f'real_df cols: {real_df.columns}')
-    # Create a PyMC model
-    with pm.Model(coords={"features": feature_names, "positions": np.unique(position_idx)}) as model:
+    # Obtain feature names for the model
+    feature_names = [f"f{i}" for i in range(n_features)]
+    
+    # Create a PyMC model with proper coordinates
+    with pm.Model(coords={"features": feature_names, "positions": position_names, "obs": range(len(y_pm_train))}) as model:
         pos = pm.Data("pos", position_idx, dims='obs') 
-        
         X_data = pm.Data("X_data", X_pm_train, dims=("obs", "features"))
         y_data = pm.Data("y_data", y_pm_train, dims="obs")
 
         intercept_mu = pm.Normal("intercept_mu", mu=intercept_mean, sigma=5)
         intercept_sd = pm.Exponential("intercept_sd", lam=1)
-        intercept = pm.Normal("intercept", mu=intercept_mu, sigma = intercept_sd, dims="positions")
+        intercept = pm.Normal("intercept", mu=intercept_mu, sigma=intercept_sd, dims="positions")
 
         betas_mu = pm.Normal("betas_mu", mu=coef_mean, sigma=1, dims='features')
         betas_sd = pm.Exponential("betas_sd", lam=1, dims='features')
         betas = pm.Normal("betas", mu=betas_mu, sigma=betas_sd, dims=("positions", "features"))
         
-        beta_sigma = pm.Normal("beta_sigma", mu=0, sigma=1, shape=X_data.shape[1])
-        log_sigma = pm.Deterministic("log_sigma", pm.math.dot(X_data, beta_sigma))
-        sigma = pm.Deterministic("sigma", pm.math.exp(log_sigma))
+        beta_sigma = pm.Normal("beta_sigma", mu=0, sigma=0.1, dims='features')
+        log_sigma_base = pm.Normal("log_sigma_base", mu=np.log(sigma_est), sigma=0.5)
+        log_sigma = log_sigma_base + pm.math.dot(X_data, beta_sigma)
+        sigma = pm.Deterministic("sigma", pm.math.exp(log_sigma), dims='obs')
 
-        mu = intercept[pos] + pm.math.sum(X_data * betas[pos], axis=1) # dimensions don't match, need to fix
+        mu = pm.Deterministic("mu", 
+                            intercept[pos] + pm.math.sum(betas[pos] * X_data, axis=1), 
+                            dims='obs')
         
         nu = pm.Exponential("nu", 1/30)
         y_obs = pm.StudentT("y_obs", nu=nu, mu=mu, sigma=sigma, observed=y_data, dims='obs')
-        # Sample from the posterior
+        
         print("Sampling from the posterior...")
         trace = pm.sample(draws=2000, tune=2000, chains=4, cores=4, target_accept=0.95, random_seed=11)
 
@@ -237,13 +253,13 @@ def split_data_and_train_pm_model(filepath, cols_to_drop=['season', 'gsis_id', '
     # Create train and test datasets
     pm_train_df, pm_test_df = read_in_data_for_projections(filepath, train_min_year=train_min_year, train_test_split_year=train_test_split_year)
     # Create X and y for training and testing
-    X_train, y_train, X_test, y_test = create_X_y_train_test(pm_train_df, pm_test_df, cols_to_drop=cols_to_drop)
+    X_train, y_train, X_test, y_test, X_train_index, X_test_index = create_X_y_train_test(pm_train_df, pm_test_df, cols_to_drop=cols_to_drop)
     # Add is_draftable column based on logistic regression threshold
     #X_train, X_test = add_is_draftable_column(X_train, y_train, X_test, y_test)
     # Run the probabilistic model
     print("Running probabilistic model...")
     #trace = run_pm_model(X_train.values, y_train)
-    trace = run_pm_model(X_train, y_train, filepath)
+    trace = run_pm_model(X_train, y_train, filepath, train_indices=X_train_index)
 
     return trace, X_test, y_test
 
