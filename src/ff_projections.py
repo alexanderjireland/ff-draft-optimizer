@@ -218,20 +218,25 @@ def run_pm_model(X_train, y_train, filepath, train_indices):
         betas_sd = pm.Exponential("betas_sd", lam=1, dims='features')
         betas = pm.Normal("betas", mu=betas_mu, sigma=betas_sd, dims=("positions", "features"))
         
-        beta_sigma = pm.Normal("beta_sigma", mu=0, sigma=0.1, dims='features')
-        log_sigma_base = pm.Normal("log_sigma_base", mu=np.log(sigma_est), sigma=0.5)
-        log_sigma = log_sigma_base + pm.math.dot(X_data, beta_sigma)
-        sigma = pm.Deterministic("sigma", pm.math.exp(log_sigma), dims='obs')
+        beta_sigma = pm.Normal("beta_sigma", mu=0, sigma=1, shape=X_data.shape[1])
+        #log_sigma_base = pm.Normal("log_sigma_base", mu=np.log(sigma_est), sigma=0.5)
+        #log_sigma = log_sigma_base + pm.math.dot(X_data, beta_sigma)
+        #sigma = pm.Deterministic("sigma", pm.math.exp(log_sigma), dims='obs')
 
-        mu = pm.Deterministic("mu", 
-                            intercept[pos] + pm.math.sum(betas[pos] * X_data, axis=1), 
-                            dims='obs')
+        log_sigma = pm.Deterministic("log_sigma", pm.math.dot(X_data, beta_sigma))
+        sigma = pm.Deterministic("sigma", pm.math.exp(log_sigma))
+
+        #mu = pm.Deterministic("mu", 
+                            #intercept[pos] + pm.math.sum(betas[pos] * X_data, axis=1), 
+                            #dims='obs')
+
+        mu = intercept[pos] + pm.math.sum(betas[pos] * X_data, axis=1)
         
         nu = pm.Exponential("nu", 1/30)
         y_obs = pm.StudentT("y_obs", nu=nu, mu=mu, sigma=sigma, observed=y_data, dims='obs')
         
         print("Sampling from the posterior...")
-        trace = pm.sample(draws=2000, tune=2000, chains=4, cores=4, target_accept=0.95, random_seed=11)
+        trace = pm.sample(draws=1000, tune=1000, chains=2, cores=2, target_accept=0.95, random_seed=11)
 
     return trace
 
