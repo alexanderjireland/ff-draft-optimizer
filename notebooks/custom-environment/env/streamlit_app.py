@@ -203,13 +203,15 @@ def get_obs_df(obs_dict):
     obs_df = pd.DataFrame(unflattened_dict, index=index)
     
     player_names = []
+    player_ids = []
     for i in range(4):
         player_names.append(st.session_state.env.env.gsis_to_name.get(st.session_state.env.env._get_player_from_action(i), "N/A"))
+        player_ids.append(st.session_state.env.env._get_player_from_action(i))
     obs_df['player'] = player_names
     new_obs_index = ["player", "projected_pts", "difference_with_replacement", "hurt_score", "difference_with_current_worst_starter", "action_mask", "pos_available", "team_needs", "next_opponent_needs"]
     obs_df_transpose = obs_df.T
     new_obs_df_transpose = obs_df_transpose.loc[new_obs_index]
-    return new_obs_df_transpose
+    return new_obs_df_transpose, player_ids
 
 
 @st.cache_resource
@@ -280,35 +282,32 @@ def setup_ray_and_load_model():
     )
     
     algo = config.build()
-    checkpoint_path = r"C:\Users\irela\Documents\NSS_Projects\ff-draft-optimizer\models\fantasy_rl_checkpoints\final_checkpoint_20250626_195555"
+    checkpoint_path = r"C:\Users\irela\Documents\NSS_Projects\ff-draft-optimizer\models\fantasy_rl_checkpoints\final_checkpoint_20250627_015625"
     algo.restore(checkpoint_path)
     policy = algo.get_policy("shared_policy")
+
+    #trace = az.from_netcdf("bayesian_regression_model/full_send_model_06_03.nc")
+    trace_path = "bayesian_regression_model/full_send_model_06_03.nc"
+    X_test = pd.read_csv("bayesian_regression_model/X_test_06_26.csv", index_col=0)
+    y_test = pd.read_csv("bayesian_regression_model/y_test_06_26.csv")
+    with open("bayesian_regression_model/index_to_playerid_dict.json", 'r') as f:
+        index_dict = json.load(f)
+    reverse_index_dict = {value: key for key, value in index_dict.items()}
+    pm_test = pd.read_csv("bayesian_regression_model/pm_test_06_26.csv")
     
-    return algo, policy, test_df_ref
+    return algo, policy, test_df_ref, X_test, y_test, index_dict, reverse_index_dict, trace_path
+
 
 #------------------------------------- Bayesian Regresion --------------------------------
-    
-def predict_player(i, trace, X_test, y_test, index_dict, plot=False):
-    """Predicts and visualizes the posterior distribution of fantasy points for a single player.
+def create_credible_interval(posterior_pred_samples, interval_size):
+    begin = (100 - interval_size)/2
+    return np.percentile(posterior_pred_samples, [begin, (100-begin)])
 
-    Args:
-        i (int): Index of the player in the test set.
-        trace (arviz.InferenceData): Posterior samples trace from PyMC model.
-        X_test (pd.DataFrame): Test feature DataFrame.
-        y_test (pd.DataFrame): True fantasy points for test set.
-        plot (bool): Whether to display a histogram of the posterior predictive distribution.
-
-    Returns:
-        None
-    """
-    def create_credible_interval(posterior_pred_samples, interval_size):
-        begin = (100 - interval_size)/2
-        return np.percentile(posterior_pred_samples, [begin, (100-begin)])
-
+@st.cache_data(show_spinner=False)
+def get_posterior_predictive_samples(i, trace_path, X_test):
     # Identify the player features and true fantasy points for the i-th player in the test set
+    trace = az.from_netcdf(trace_path)
     player_features = X_test.iloc[int(i)]
-    print(player_features)
-    print(y_test.iloc[int(i)])
 
     # Extract the posterior samples from the trace
     intercept_samples = trace.posterior["intercept"].values.flatten()
@@ -324,38 +323,36 @@ def predict_player(i, trace, X_test, y_test, index_dict, plot=False):
 
     # Take mean and std of the posterior predictive distribution to create samples
     posterior_pred_samples = np.random.normal(mu_samples, sigma_samples)
+    return posterior_pred_samples
 
-    # Calculate statistics from the posterior predictive samples
-    projected_median = np.median(posterior_pred_samples)
-    credible_interval_95 = create_credible_interval(posterior_pred_samples, 95)
-    credible_interval_90 = create_credible_interval(posterior_pred_samples, 90)
-    credible_interval_85 = create_credible_interval(posterior_pred_samples, 85)
-    credible_interval_75 = create_credible_interval(posterior_pred_samples, 75)
-    credible_interval_50 = create_credible_interval(posterior_pred_samples, 50)
-    prob_gt_200 = np.mean(posterior_pred_samples > 200)
+def predict_player(i, trace_path, X_test, y_test, index_dict, plot=False):
 
+    posterior_pred_samples = get_posterior_predictive_samples(i, trace_path, X_test)
     player_id = index_dict[str(i)]
-    print(f"player_id: {player_id}")
     player_name = st.session_state.env.env.gsis_to_name.get(player_id)
-    print(f"player_name: {player_name}")
-
+ 
     # Plot posterior predictive distribution
     fig = plt.figure(figsize=(10, 6))
-    ax = fig.add_subplot(111) # Add a subplot to the figure (or you can use plt.subplots for convenience)
+    ax = fig.add_subplot(111)
+
+    projected_median = np.median(posterior_pred_samples)
 
     sns.histplot(posterior_pred_samples, bins=50, kde=True, color="skyblue", ax=ax)
     ax.axvline(projected_median, color="red", linestyle="--", label=f"Median: {projected_median:.1f}")
-    ax.axvline(200, color="green", linestyle=":", label="200-point threshold")
     ax.set_title(f"Posterior Predictive Distribution for {player_name}")
     ax.set_xlabel("Predicted Season Points")
+    ax.axis(xmin=0, xmax=500, ymin=0, ymax=650)
     ax.set_ylabel("Density")
-    ax.legend()
+
     ax.grid(True)
 
-    # Optional: Display the plot
-    if plot:
-        plt.show()
+    threshold = st.slider(f"Set Probability threshold for {player_name}", 0, 500, 200, step=5)
+    prob_gtt = np.mean(posterior_pred_samples > threshold)
+    ax.axvline(threshold, color="purple", label=f"Probability Threshold: {threshold}")
+    ax.text(threshold+10, 550, f"Prob > {threshold}: {prob_gtt:.2%}", color="purple", verticalalignment="top", bbox=dict(boxstyle="round,pad=0.3", fc="yellow", ec="b", lw=1, alpha=0.5))
     
+    ax.legend(loc="upper right")
+
     return fig
 
 #------------------------------------- Draft Loop -------------------------------------
@@ -374,6 +371,8 @@ if 'test_df_ref' not in st.session_state:
     st.session_state.test_df_ref = None
 
 with st.sidebar:
+    if "done" in st.session_state and not st.session_state.done:
+            st.subheader(f"Pick {min((st.session_state.env.env.current_pick + 1), st.session_state.env.env.total_picks)} / {st.session_state.env.env.total_picks}")
     st.markdown("---")
     st.subheader("Draft Configuration")
     NUM_TEAMS = st.slider("Number of teams drafting", 2, 12, value=2)
@@ -404,7 +403,7 @@ with st.sidebar:
 if st.session_state.draft_started:
     if not st.session_state.env_initialized:
         if st.session_state.algo is None:
-            st.session_state.algo, st.session_state.policy, st.session_state.test_df_ref = setup_ray_and_load_model()
+            st.session_state.algo, st.session_state.policy, st.session_state.test_df_ref, st.session_state.X_test, st.session_state.y_test, st.session_state.index_dict, st.session_state.reverse_index_dict, st.session_state.trace_path = setup_ray_and_load_model()
         
         env_config = {
             'player_df_ref': st.session_state.test_df_ref,
@@ -424,27 +423,9 @@ if st.session_state.draft_started:
         st.session_state.env_initialized = True
         st.session_state.map_col_names = {'player_name': 'Player Name', 'position': 'Position', 'projected_pts':"Projected Points", "fantasy_pts":"Total Fantasy Points (2024)"}
 
-        st.session_state.trace = az.from_netcdf("bayesian_regression_model/full_send_model_06_03.nc")
-        st.session_state.X_test = pd.read_csv("bayesian_regression_model/X_test_06_26.csv", index_col=0)
-        st.session_state.y_test = pd.read_csv("bayesian_regression_model/y_test_06_26.csv")
-        with open("bayesian_regression_model/index_to_playerid_dict.json", 'r') as f:
-            st.session_state.index_dict = json.load(f)
-        st.session_state.reverse_index_dict = {value: key for key, value in st.session_state.index_dict.items()}
-        st.session_state.pm_test = pd.read_csv("bayesian_regression_model/pm_test_06_26.csv")
-
     # Display the available player pool
     with st.expander("Draft Player Pool", expanded=False):
         st.dataframe(st.session_state.env.env.player_pool_df[['position', 'player_name']].sort_values('position').rename(columns=st.session_state.map_col_names), hide_index=True)
-    # Add draft board? Displaying rosters...
-    st.header("Draft Board")
-    max_roster = st.session_state.ROUNDS
-    df = {}
-    for agent, info in st.session_state.env.env.team_info.items():
-        current_roster = info['roster']
-        current_roster_names = [f"{st.session_state.env.env.gsis_to_position[player]}: {st.session_state.env.env.gsis_to_name[player]}" for player in list(current_roster)]
-        players = current_roster_names + ([None]*(max_roster - len(current_roster_names)))
-        df[agent] = players
-    st.dataframe(pd.DataFrame(df).rename(columns=st.session_state.teams_dict))
 
     col1, col2 = st.columns(2, border=False)
     
@@ -452,6 +433,17 @@ if st.session_state.draft_started:
 
     with col2:
         if not st.session_state.done:
+
+            st.header("Draft Board")
+            max_roster = st.session_state.ROUNDS
+            df = {}
+            for agent, info in st.session_state.env.env.team_info.items():
+                current_roster = info['roster']
+                current_roster_names = [f"{st.session_state.env.env.gsis_to_position[player]}: {st.session_state.env.env.gsis_to_name[player]}" for player in list(current_roster)]
+                players = current_roster_names + ([None]*(max_roster - len(current_roster_names)))
+                df[agent] = players
+            st.dataframe(pd.DataFrame(df).rename(columns=st.session_state.teams_dict))
+
             current_agent = st.session_state.env.env.agent_selection
             st.subheader("My Roster")
             roster = {}
@@ -492,11 +484,6 @@ if st.session_state.draft_started:
                     player_name = st.session_state.env.env.gsis_to_name.get(player_id, "N/A")
                     st.success(f"You drafted {player_name}.")
 
-                    # Obviously move this elsewhere but it works!
-                    player_idx = st.session_state.reverse_index_dict.get(player_id)
-                    fig = predict_player(player_idx, st.session_state.trace, st.session_state.X_test, st.session_state.y_test, st.session_state.index_dict)
-                    st.pyplot(fig)
-                    time.sleep(5)
                                     
                     st.session_state.env.env.step(action_to_take)
                     st.session_state.step += 1
@@ -508,9 +495,6 @@ if st.session_state.draft_started:
 
         if not st.session_state.done:
 
-            current_agent = st.session_state.env.env.agent_selection
-            st.header(f"Pick {st.session_state.env.env.current_pick + 1} / {st.session_state.env.env.total_picks}")
-
             if current_agent == st.session_state.human_agent_name:
                 st.subheader(f"Your Turn ({st.session_state.teams_dict.get(current_agent)})")
 
@@ -518,7 +502,17 @@ if st.session_state.draft_started:
                 flat_obs = flatten_obs_dict(obs)
 
                 st.write("Current Observation:")
-                st.dataframe(get_obs_df(flat_obs))
+                obs_df, ids = get_obs_df(flat_obs)
+                st.dataframe(obs_df)
+                #threshold = st.slider("Select Probability Threshold", 0, 500, 300)
+                #calculate = st.button("Calculate Probability")
+                #if calculate:
+                options = [f"{st.session_state.env.env.gsis_to_position.get(id)}: {st.session_state.env.env.gsis_to_name.get(id)}" for id in ids]
+                player = st.segmented_control("Posterior Predictive Distributions", options, default=options[model_action_index])
+                player_id = ids[options.index(player)]
+                player_idx = st.session_state.reverse_index_dict.get(player_id)
+                fig = predict_player(player_idx, st.session_state.trace_path, st.session_state.X_test, st.session_state.y_test, st.session_state.index_dict)
+                st.pyplot(fig)
 
             else:
                 st.subheader(f"{st.session_state.teams_dict.get(current_agent)}'s Turn (AI)")
@@ -542,9 +536,20 @@ if st.session_state.draft_started:
                     st.session_state.step += 1
                     st.rerun()
 
+
     if st.session_state.done:
+        st.header("Draft Board")
+        max_roster = st.session_state.ROUNDS
+        df = {}
+        for agent, info in st.session_state.env.env.team_info.items():
+            current_roster = info['roster']
+            current_roster_names = [f"{st.session_state.env.env.gsis_to_position[player]}: {st.session_state.env.env.gsis_to_name[player]}" for player in list(current_roster)]
+            players = current_roster_names + ([None]*(max_roster - len(current_roster_names)))
+            df[agent] = players
+        st.dataframe(pd.DataFrame(df).rename(columns=st.session_state.teams_dict))
+
         st.header("Draft Complete", divider="gray", help=None)
-        time.sleep(.2)
+        time.sleep(.6)
         rain(
             emoji="🏈",
             font_size=54,
