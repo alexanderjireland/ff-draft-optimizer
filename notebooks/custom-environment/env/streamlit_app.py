@@ -294,8 +294,9 @@ def setup_ray_and_load_model():
         index_dict = json.load(f)
     reverse_index_dict = {value: key for key, value in index_dict.items()}
     pm_test = pd.read_csv("bayesian_regression_model/pm_test_06_26.csv")
+    pm_test_2024 = pm_test[pm_test['season']==2024]
     
-    return algo, policy, test_df_ref, X_test, y_test, index_dict, reverse_index_dict, trace_path
+    return algo, policy, test_df_ref, X_test, y_test, index_dict, reverse_index_dict, trace_path, pm_test_2024
 
 
 #------------------------------------- Bayesian Regresion --------------------------------
@@ -387,7 +388,7 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("Draft Configuration")
     NUM_TEAMS = st.slider("Number of teams drafting", 2, 12, value=2)
-    POOL_SIZE = st.slider("Select player pool size", 1, 430, value=100, help="Select the pool size of random players taken from all eligible fantasy players in 2024.")
+    POOL_SIZE = st.slider("Select player pool size", 40, 430, value=100, help="Select the pool size of random players taken from all eligible fantasy players in 2024.")
     ROUNDS = st.slider("Number of draft rounds", 1, 14, value=14)
     teams = [f"team_{i}" for i in range(NUM_TEAMS)]
     st.session_state.teams_dict = {team: team.capitalize().replace("_", " ") for team in teams}
@@ -395,7 +396,7 @@ with st.sidebar:
     HUMAN_TEAM_DISPLAY = st.pills("Pick your team", list(st.session_state.teams_dict.values()), default="Team 0")
     HUMAN_TEAM = st.session_state.get_actual_team.get(HUMAN_TEAM_DISPLAY)
     DRAFT_TYPE = st.pills("Draft Type", ["Snake", "Linear"], default="Linear", help="The draft order reverses each round in a snake draft, while the order remains the same in a linear draft.")
-
+    fill_draftboard = st.checkbox("Color Fill Draft Board", value=False)
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Start Draft", disabled=st.session_state.draft_started, key="start_draft_button"):
@@ -414,7 +415,7 @@ with st.sidebar:
 if st.session_state.draft_started:
     if not st.session_state.env_initialized:
         if st.session_state.algo is None:
-            st.session_state.algo, st.session_state.policy, st.session_state.test_df_ref, st.session_state.X_test, st.session_state.y_test, st.session_state.index_dict, st.session_state.reverse_index_dict, st.session_state.trace_path = setup_ray_and_load_model()
+            st.session_state.algo, st.session_state.policy, st.session_state.test_df_ref, st.session_state.X_test, st.session_state.y_test, st.session_state.index_dict, st.session_state.reverse_index_dict, st.session_state.trace_path, st.session_state.pm_test = setup_ray_and_load_model()
         
         env_config = {
             'player_df_ref': st.session_state.test_df_ref,
@@ -433,7 +434,7 @@ if st.session_state.draft_started:
         st.session_state.done = False
         st.session_state.env_initialized = True
         st.session_state.map_col_names = {'player_name': 'Player Name', 'position': 'Position', 'projected_pts':"Projected Points", "fantasy_pts":"Total Fantasy Points (2024)"}
-
+        
     # Display the available player pool
     with st.expander("Draft Player Pool", expanded=False):
         st.dataframe(st.session_state.env.env.player_pool_df[['position', 'player_name']].sort_values('position').rename(columns=st.session_state.map_col_names), hide_index=True)
@@ -453,7 +454,11 @@ if st.session_state.draft_started:
                 current_roster_names = [f"{st.session_state.env.env.gsis_to_position[player]}: {st.session_state.env.env.gsis_to_name[player]}" for player in list(current_roster)]
                 players = current_roster_names + ([None]*(max_roster - len(current_roster_names)))
                 df[agent] = players
-            st.dataframe(pd.DataFrame(df).rename(columns=st.session_state.teams_dict).style.map(lambda x: color_position(x)))
+            df = pd.DataFrame(df).rename(columns=st.session_state.teams_dict)
+            if fill_draftboard:
+                st.dataframe(df.style.map(lambda x: color_position(x)))
+            else:
+                st.dataframe(df)
 
             current_agent = st.session_state.env.env.agent_selection
             st.subheader("My Roster")
@@ -529,8 +534,11 @@ if st.session_state.draft_started:
                     player = st.segmented_control("Posterior Predictive Distributions", options, default=default)
                     player_id = ids[options.index(player)]
                     player_idx = st.session_state.reverse_index_dict.get(player_id)
-                    fig = predict_player(player_idx, st.session_state.trace_path, st.session_state.X_test, st.session_state.y_test, st.session_state.index_dict)
-                    st.pyplot(fig)
+                    if player_idx is not None:
+                        fig = predict_player(player_idx, st.session_state.trace_path, st.session_state.X_test, st.session_state.y_test, st.session_state.index_dict)
+                        st.pyplot(fig)
+                    else:
+                        st.warning(f"Player index: Model suggestion '{player_idx}' not available.")
 
             else:
                 st.subheader(f"{st.session_state.teams_dict.get(current_agent)}'s Turn (AI)")
@@ -554,6 +562,9 @@ if st.session_state.draft_started:
                     st.session_state.step += 1
                     st.rerun()
 
+    show_pm_test = st.toggle("Show Player Data")
+    if show_pm_test:
+        st.dataframe(st.session_state.pm_test[st.session_state.pm_test['gsis_id']==player_id])
 
     if st.session_state.done:
         st.header("Draft Board")
@@ -565,8 +576,11 @@ if st.session_state.draft_started:
             players = current_roster_names + ([None]*(max_roster - len(current_roster_names)))
             df[agent] = players
         df = pd.DataFrame(df).rename(columns=st.session_state.teams_dict)
-        df = df.style.map(lambda x: color_position(x))
-        st.dataframe(df)
+        if fill_draftboard:
+            st.dataframe(df.style.map(lambda x: color_position(x)))
+        else:
+            st.dataframe(df)
+
 
         st.header("Draft Complete", divider="gray", help=None)
         time.sleep(.6)
