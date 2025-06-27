@@ -355,6 +355,17 @@ def predict_player(i, trace_path, X_test, y_test, index_dict, plot=False):
 
     return fig
 
+def color_position(val):
+    if 'QB' in str(val):
+        return 'background-color: lightblue'
+    elif 'RB' in str(val):
+        return 'background-color: lightgreen'
+    elif 'WR' in str(val):
+        return 'background-color: lightcoral'
+    elif 'TE' in str(val):
+        return 'background-color: lightsalmon'
+    else:
+        return ''
 #------------------------------------- Draft Loop -------------------------------------
 
 st.title("Fantasy Football Mock Draft")
@@ -442,7 +453,7 @@ if st.session_state.draft_started:
                 current_roster_names = [f"{st.session_state.env.env.gsis_to_position[player]}: {st.session_state.env.env.gsis_to_name[player]}" for player in list(current_roster)]
                 players = current_roster_names + ([None]*(max_roster - len(current_roster_names)))
                 df[agent] = players
-            st.dataframe(pd.DataFrame(df).rename(columns=st.session_state.teams_dict))
+            st.dataframe(pd.DataFrame(df).rename(columns=st.session_state.teams_dict).style.map(lambda x: color_position(x)))
 
             current_agent = st.session_state.env.env.agent_selection
             st.subheader("My Roster")
@@ -504,21 +515,28 @@ if st.session_state.draft_started:
                 st.write("Current Observation:")
                 obs_df, ids = get_obs_df(flat_obs)
                 st.dataframe(obs_df)
-                #threshold = st.slider("Select Probability Threshold", 0, 500, 300)
-                #calculate = st.button("Calculate Probability")
-                #if calculate:
-                options = [f"{st.session_state.env.env.gsis_to_position.get(id)}: {st.session_state.env.env.gsis_to_name.get(id)}" for id in ids]
-                player = st.segmented_control("Posterior Predictive Distributions", options, default=options[model_action_index])
-                player_id = ids[options.index(player)]
-                player_idx = st.session_state.reverse_index_dict.get(player_id)
-                fig = predict_player(player_idx, st.session_state.trace_path, st.session_state.X_test, st.session_state.y_test, st.session_state.index_dict)
-                st.pyplot(fig)
+                ppdist_display = True
+                options = [f"{st.session_state.env.env.gsis_to_position.get(id)}: {st.session_state.env.env.gsis_to_name.get(id)}" for id in ids if id is not None]
+                try:
+                    default=options[model_action_index]
+                except:
+                    try:
+                        default=options[0]
+                    except:
+                        ppdist_display = False
+                
+                if ppdist_display:
+                    player = st.segmented_control("Posterior Predictive Distributions", options, default=default)
+                    player_id = ids[options.index(player)]
+                    player_idx = st.session_state.reverse_index_dict.get(player_id)
+                    fig = predict_player(player_idx, st.session_state.trace_path, st.session_state.X_test, st.session_state.y_test, st.session_state.index_dict)
+                    st.pyplot(fig)
 
             else:
                 st.subheader(f"{st.session_state.teams_dict.get(current_agent)}'s Turn (AI)")
 
                 with st.spinner(f"AI ({st.session_state.teams_dict.get(current_agent)}) is thinking..."):
-                    time.sleep((np.random.rand())) # Give the illusion of the AI thinking hard hehe
+                    #time.sleep((np.random.rand())) # Give the illusion of the AI thinking hard hehe
                     obs = st.session_state.env.env.observe(current_agent)
                     flat_obs = flatten_obs_dict(obs)
 
@@ -546,7 +564,9 @@ if st.session_state.draft_started:
             current_roster_names = [f"{st.session_state.env.env.gsis_to_position[player]}: {st.session_state.env.env.gsis_to_name[player]}" for player in list(current_roster)]
             players = current_roster_names + ([None]*(max_roster - len(current_roster_names)))
             df[agent] = players
-        st.dataframe(pd.DataFrame(df).rename(columns=st.session_state.teams_dict))
+        df = pd.DataFrame(df).rename(columns=st.session_state.teams_dict)
+        df = df.style.map(lambda x: color_position(x))
+        st.dataframe(df)
 
         st.header("Draft Complete", divider="gray", help=None)
         time.sleep(.6)
@@ -577,10 +597,11 @@ if st.session_state.draft_started:
 
             optimized_roster_df = st.session_state.env.env._get_optimized_lineup(roster_df)
             st.write("Optimized Starting Lineup:")
-            st.dataframe(optimized_roster_df[['position', 'player_name', 'projected_pts', 'fantasy_pts']].sort_values('projected_pts', ascending=False).rename(columns=st.session_state.map_col_names), hide_index=True)
-            st.metric(label="Total Projected Points (Starters)", value=f"{optimized_roster_df['projected_pts'].sum():.2f}")
-            st.metric(label="Total Fantasy Points (Starters)", value=f"{optimized_roster_df['fantasy_pts'].sum():.2f}")
-            st.divider()
+            if optimized_roster_df is not None: # Figure out how to handle small player pool
+                st.dataframe(optimized_roster_df[['position', 'player_name', 'projected_pts', 'fantasy_pts']].sort_values('projected_pts', ascending=False).rename(columns=st.session_state.map_col_names), hide_index=True)
+                st.metric(label="Total Projected Points (Starters)", value=f"{optimized_roster_df['projected_pts'].sum():.2f}")
+                st.metric(label="Total Fantasy Points (Starters)", value=f"{optimized_roster_df['fantasy_pts'].sum():.2f}")
+                st.divider()
 
         if st.session_state.NUM_TEAMS < 3:
             fin_col1, fin_col2 = st.columns(2)
