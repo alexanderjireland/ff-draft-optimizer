@@ -283,15 +283,21 @@ def setup_ray_and_load_model():
 
 #------------------------------------- Draft Loop -------------------------------------
 
+st.title("Fantasy Football Mock Draft")
+progress_bar = st.progress(0)
+status_text = st.empty()
+
 algo, policy, test_df_ref = setup_ray_and_load_model()
+progress_bar.progress(100)
+status_text.text("Complete!")
 
 if 'env_vars' not in st.session_state:
     st.session_state.env_vars = True
     st.session_state.CHECKPOINT_PATH = r"C:\Users\irela\Documents\NSS_Projects\ff-draft-optimizer\models\fantasy_rl_checkpoints\final_checkpoint_20250626_195555"
-    st.session_state.HUMAN_TEAM_ID = 1
-    st.session_state.POOL_SIZE = 100
-    st.session_state.ROUNDS = 2
-    st.session_state.NUM_TEAMS = 2
+    st.session_state.HUMAN_TEAM_ID = 6
+    st.session_state.POOL_SIZE = 500
+    st.session_state.ROUNDS = 14
+    st.session_state.NUM_TEAMS = 12
     st.session_state.DRAFT_TYPE = 'regular'
 
     st.write("--- Initializing Mock Draft ---")
@@ -371,10 +377,12 @@ if not st.session_state.done:
             else:
                 action_to_take = int(user_choice_str.split(":")[0].strip())
 
-            st.session_state.env.env.step(action_to_take)
+            
             player_id = st.session_state.env.env._get_player_from_action(action_to_take)
             player_name = st.session_state.env.env.gsis_to_name.get(player_id, "N/A")
             st.success(f"You drafted {player_name}.")
+            
+            st.session_state.env.env.step(action_to_take)
             st.session_state.step += 1
             st.rerun()
 
