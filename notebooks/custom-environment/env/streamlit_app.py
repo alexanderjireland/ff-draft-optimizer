@@ -198,7 +198,10 @@ def get_obs_df(obs_dict):
     for i in range(4):
         player_names.append(st.session_state.env.env.gsis_to_name.get(st.session_state.env.env._get_player_from_action(i), "N/A"))
     obs_df['player'] = player_names
-    return obs_df.T
+    new_obs_index = ["player", "projected_pts", "difference_with_replacement", "hurt_score", "difference_with_current_worst_starter", "action_mask", "pos_available", "team_needs", "next_opponent_needs"]
+    obs_df_transpose = obs_df.T
+    new_obs_df_transpose = obs_df_transpose.loc[new_obs_index]
+    return new_obs_df_transpose
 
 
 @st.cache_resource
@@ -291,20 +294,33 @@ if 'policy' not in st.session_state:
 if 'test_df_ref' not in st.session_state:
     st.session_state.test_df_ref = None
 
-st.markdown("---")
-st.subheader("Draft Configuration")
-NUM_TEAMS = st.slider("Number of teams drafting", 2, 12, value=2)
-POOL_SIZE = st.slider("Select player pool size", 1, 500, value=100)
-ROUNDS = st.slider("Number of draft rounds", 1, 14, value=14)
-teams = [f"team_{i}" for i in range(NUM_TEAMS)]
-HUMAN_TEAM = st.pills("Pick your team", teams, default="team_0")
-DRAFT_TYPE = st.pills("Draft Type", ["Snake", "Linear"], default="Linear")
+with st.sidebar:
+    st.markdown("---")
+    st.subheader("Draft Configuration")
+    NUM_TEAMS = st.slider("Number of teams drafting", 2, 12, value=2)
+    POOL_SIZE = st.slider("Select player pool size", 1, 430, value=100, help="Select the pool size of random players taken from all eligible fantasy players in 2024.")
+    ROUNDS = st.slider("Number of draft rounds", 1, 14, value=14)
+    teams = [f"team_{i}" for i in range(NUM_TEAMS)]
+    st.session_state.teams_dict = {team: team.capitalize().replace("_", " ") for team in teams}
+    st.session_state.get_actual_team = {name: team for team, name in st.session_state.teams_dict.items()}
+    HUMAN_TEAM_DISPLAY = st.pills("Pick your team", list(st.session_state.teams_dict.values()), default="Team 0")
+    HUMAN_TEAM = st.session_state.get_actual_team.get(HUMAN_TEAM_DISPLAY)
+    DRAFT_TYPE = st.pills("Draft Type", ["Snake", "Linear"], default="Linear", help="The draft order reverse each round in a snake draft, while the order remains the same in a linear draft.")
 
-if st.button("Start Draft", disabled=st.session_state.draft_started, key="start_draft_button"):
-    st.session_state.ROUNDS = ROUNDS
-    st.session_state.draft_started = True
-    st.session_state.env_initialized = False
-    st.rerun()
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Start Draft", disabled=st.session_state.draft_started, key="start_draft_button"):
+            st.session_state.ROUNDS = ROUNDS
+            st.session_state.NUM_TEAMS = NUM_TEAMS
+            st.session_state.draft_started = True
+            st.session_state.env_initialized = False
+            st.rerun()
+    with col2:
+        # Reset button
+        if st.button("Reset Draft"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
 
 if st.session_state.draft_started:
     if not st.session_state.env_initialized:
@@ -327,112 +343,39 @@ if st.session_state.draft_started:
         st.session_state.step = 0
         st.session_state.done = False
         st.session_state.env_initialized = True
+        st.session_state.map_col_names = {'player_name': 'Player Name', 'position': 'Position', 'projected_pts':"Projected Points", "fantasy_pts":"Total Fantasy Points (2024)"}
 
     # Display the available player pool
-    with st.expander("Full Player Pool", expanded=False):
-        st.dataframe(st.session_state.env.env.player_pool_df[['position', 'player_name']].sort_values('position'))
+    with st.expander("Draft Player Pool", expanded=False):
+        st.dataframe(st.session_state.env.env.player_pool_df[['position', 'player_name']].sort_values('position').rename(columns=st.session_state.map_col_names), hide_index=True)
 
     # Add draft board? Displaying rosters...
-    col1, col2, col3 = st.columns([2, 1, 1], border=True)
-    with col1:
-        st.write("### Draft Board")
-        max_roster = st.session_state.ROUNDS
-        df = {}
-        for agent, info in st.session_state.env.env.team_info.items():
-            current_roster = info['roster']
-            current_roster_names = [f"{st.session_state.env.env.gsis_to_position[player]}: {st.session_state.env.env.gsis_to_name[player]}" for player in list(current_roster)]
-            players = current_roster_names + ([None]*(max_roster - len(current_roster_names)))
-            df[agent] = players
-        st.dataframe(pd.DataFrame(df))
+    st.header("Draft Board")
+    max_roster = st.session_state.ROUNDS
+    df = {}
+    for agent, info in st.session_state.env.env.team_info.items():
+        current_roster = info['roster']
+        current_roster_names = [f"{st.session_state.env.env.gsis_to_position[player]}: {st.session_state.env.env.gsis_to_name[player]}" for player in list(current_roster)]
+        players = current_roster_names + ([None]*(max_roster - len(current_roster_names)))
+        df[agent] = players
+    st.dataframe(pd.DataFrame(df).rename(columns=st.session_state.teams_dict))
 
+    col1, col2 = st.columns(2, border=False)
+    
+    st.session_state.done = all(st.session_state.env.env.terminations.values())
 
     with col2:
-        if st.session_state.env.env.current_pick >= st.session_state.env.env.total_picks:
-            st.session_state.done = True
-
         if not st.session_state.done:
-
             current_agent = st.session_state.env.env.agent_selection
-            st.header(f"Pick {st.session_state.env.env.current_pick + 1} / {st.session_state.env.env.total_picks}")
-
+            st.subheader("My Roster")
+            roster = {}
+            for key, value in st.session_state.env.env.team_info[st.session_state.human_agent_name]['pos_roster'].items():
+                roster[key] = [st.session_state.env.env.gsis_to_name.get(player, 'None') for player in value]
+            roster_dict = {key: ", ".join(value) for key, value in roster.items()}
+            st.dataframe({"Roster":roster_dict})
             if current_agent == st.session_state.human_agent_name:
-                st.subheader(f"Your Turn ({current_agent})")
-
                 obs = st.session_state.env.env.observe(current_agent)
                 flat_obs = flatten_obs_dict(obs)
-
-                st.write("Current Observation:")
-                st.dataframe(get_obs_df(flat_obs))
-
-                roster = {}
-                for key, value in st.session_state.env.env.team_info[current_agent]['pos_roster'].items():
-                    roster[key] = [st.session_state.env.env.gsis_to_name.get(player, 'None') for player in value]
-                st.json(roster)
-
-            else:
-                st.subheader(f"{current_agent}'s Turn (AI)")
-
-                with st.spinner(f"AI ({current_agent}) is thinking..."):
-                    time.sleep((2*np.random.rand())+.2) # Give the illusion of the AI thinking hard hehe
-                    obs = st.session_state.env.env.observe(current_agent)
-                    flat_obs = flatten_obs_dict(obs)
-
-                    ai_action_idx = st.session_state.policy.compute_single_action(flat_obs, explore=False)[0]
-
-                    position = st.session_state.env.env.draftable_positions[ai_action_idx]
-                    player_id = st.session_state.env.env._get_player_from_action(ai_action_idx)
-                    player_name = st.session_state.env.env.gsis_to_name.get(player_id, "N/A")
-
-                    st.write(f"AI agent **{current_agent}** selects **{position}**: {player_name}.")
-                    time.sleep(0.5)
-
-                    st.session_state.env.env.step(ai_action_idx)
-
-                    st.session_state.step += 1
-                    st.rerun()
-
-            st.session_state.done = all(st.session_state.env.env.terminations.values())
-
-        if st.session_state.done:
-            st.header("--- Draft Complete ---")
-            rain(
-                emoji="🏈",
-                font_size=54,
-                falling_speed=5,
-                animation_length=3,
-            )
-            st.subheader("Final Rewards")
-            for agent, reward in st.session_state.env.env.rewards.items():
-                if agent == st.session_state.human_agent_name:
-                    st.metric(label=f"Your Team ({agent}) Final Reward", value = f"{reward:.2f}")
-                else:
-                    st.metric(label=f"{agent} Final Reward", value = f"{reward:.2f}")
-
-
-            for agent in st.session_state.env.env.team_info:
-                if agent == st.session_state.human_agent_name:
-                    st.subheader(f"Your Final Roster ({st.session_state.human_agent_name})")
-                else:
-                    st.subheader(f"{agent}'s Final Roster")
-
-                roster_df = st.session_state.env.env.full_roster_df[st.session_state.env.env.full_roster_df['agent'] == agent].copy()
-                roster_df['projected_pts'] = roster_df['gsis_id'].map(st.session_state.env.env.gsis_to_projections)
-
-                st.write("Full Roster:")
-                st.dataframe(roster_df[['player_name', 'position', 'projected_pts', 'fantasy_pts']].sort_values('projected_pts', ascending=False))
-
-                optimized_roster_df = st.session_state.env.env._get_optimized_lineup(roster_df)
-                st.write("Optimized Starting Lineup:")
-                st.dataframe(optimized_roster_df[['player_name', 'position', 'projected_pts', 'fantasy_pts']].sort_values('projected_pts', ascending=False))
-                st.metric(label="Total Projected Points (Starters)", value=f"{optimized_roster_df['projected_pts'].sum():.2f}")
-                st.metric(label="Total Actual Points (Starters)", value=f"{optimized_roster_df['fantasy_pts'].sum():.2f}")
-                st.divider()
-
-    with col3:
-        if not st.session_state.done:
-            current_agent = st.session_state.env.env.agent_selection
-            if current_agent == st.session_state.human_agent_name:
-
                 model_action_index = st.session_state.policy.compute_single_action(flat_obs, explore=False)[0]
                 suggested_position = st.session_state.env.env.draftable_positions[model_action_index]
                 suggested_player_id = st.session_state.env.env._get_player_from_action(model_action_index)
@@ -462,14 +405,105 @@ if st.session_state.draft_started:
                     player_id = st.session_state.env.env._get_player_from_action(action_to_take)
                     player_name = st.session_state.env.env.gsis_to_name.get(player_id, "N/A")
                     st.success(f"You drafted {player_name}.")
+                    time.sleep(0.5)
                     
                     st.session_state.env.env.step(action_to_take)
                     st.session_state.step += 1
                     st.rerun()
 
-        # Reset button
-        if st.button("Reset Draft"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
+    with col1:
+        if st.session_state.env.env.current_pick >= st.session_state.env.env.total_picks:
+            st.session_state.done = True
 
-            st.rerun()
+        if not st.session_state.done:
+
+            current_agent = st.session_state.env.env.agent_selection
+            st.header(f"Pick {st.session_state.env.env.current_pick + 1} / {st.session_state.env.env.total_picks}")
+
+            if current_agent == st.session_state.human_agent_name:
+                st.subheader(f"Your Turn ({st.session_state.teams_dict.get(current_agent)})")
+
+                obs = st.session_state.env.env.observe(current_agent)
+                flat_obs = flatten_obs_dict(obs)
+
+                st.write("Current Observation:")
+                st.dataframe(get_obs_df(flat_obs))
+
+            else:
+                st.subheader(f"{st.session_state.teams_dict.get(current_agent)}'s Turn (AI)")
+
+                with st.spinner(f"AI ({st.session_state.teams_dict.get(current_agent)}) is thinking..."):
+                    time.sleep((np.random.rand())) # Give the illusion of the AI thinking hard hehe
+                    obs = st.session_state.env.env.observe(current_agent)
+                    flat_obs = flatten_obs_dict(obs)
+
+                    ai_action_idx = st.session_state.policy.compute_single_action(flat_obs, explore=False)[0]
+
+                    position = st.session_state.env.env.draftable_positions[ai_action_idx]
+                    player_id = st.session_state.env.env._get_player_from_action(ai_action_idx)
+                    player_name = st.session_state.env.env.gsis_to_name.get(player_id, "N/A")
+
+                    st.write(f"AI agent **{st.session_state.teams_dict.get(current_agent)}** selects **{position}**: {player_name}.")
+                    time.sleep(0.1)
+
+                    st.session_state.env.env.step(ai_action_idx)
+
+                    st.session_state.step += 1
+                    st.rerun()
+
+    if st.session_state.done:
+        st.header("Draft Complete", divider="gray", help=None)
+        time.sleep(.2)
+        rain(
+            emoji="🏈",
+            font_size=54,
+            falling_speed=5,
+            animation_length=3,
+        )
+        with st.expander("Final Rewards"):
+            for agent, reward in st.session_state.env.env.rewards.items():
+                if agent == st.session_state.human_agent_name:
+                    st.metric(label=f"**Your Team** ({st.session_state.teams_dict.get(agent)}) Final Reward", value = f"{reward:.2f}")
+                else:
+                    st.metric(label=f"{st.session_state.teams_dict.get(agent)} Final Reward", value = f"{reward:.2f}")
+
+        def display_final_results():
+            if agent == st.session_state.human_agent_name:
+                st.subheader(f"**Your Final Roster ({st.session_state.teams_dict.get(agent)})**")
+            else:
+                st.subheader(f"{st.session_state.teams_dict.get(agent)}'s Final Roster")
+
+            roster_df = st.session_state.env.env.full_roster_df[st.session_state.env.env.full_roster_df['agent'] == agent].copy()
+            roster_df['projected_pts'] = roster_df['gsis_id'].map(st.session_state.env.env.gsis_to_projections)
+
+            st.write("Full Roster:")
+            st.dataframe(roster_df[['position', 'player_name', 'projected_pts', 'fantasy_pts']].sort_values('projected_pts', ascending=False).rename(columns=st.session_state.map_col_names), hide_index=True)
+
+            optimized_roster_df = st.session_state.env.env._get_optimized_lineup(roster_df)
+            st.write("Optimized Starting Lineup:")
+            st.dataframe(optimized_roster_df[['position', 'player_name', 'projected_pts', 'fantasy_pts']].sort_values('projected_pts', ascending=False).rename(columns=st.session_state.map_col_names), hide_index=True)
+            st.metric(label="Total Projected Points (Starters)", value=f"{optimized_roster_df['projected_pts'].sum():.2f}")
+            st.metric(label="Total Fantasy Points (Starters)", value=f"{optimized_roster_df['fantasy_pts'].sum():.2f}")
+            st.divider()
+
+        if st.session_state.NUM_TEAMS < 3:
+            fin_col1, fin_col2 = st.columns(2)
+            for i, agent in enumerate(st.session_state.env.env.team_info):
+                if i % 2 == 0:
+                    with fin_col1:
+                        display_final_results()
+                else:
+                    with fin_col2:
+                        display_final_results()
+        else:
+            fin_col1, fin_col2, fin_col3 = st.columns(3)
+            for i, agent in enumerate(st.session_state.env.env.team_info):
+                if i % 3 == 0:
+                    with fin_col1:
+                        display_final_results()
+                elif i % 3 ==1:
+                    with fin_col2:
+                        display_final_results()
+                else:
+                    with fin_col3:
+                        display_final_results()
