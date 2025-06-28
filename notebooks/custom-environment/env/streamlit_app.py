@@ -1,3 +1,4 @@
+!pip install pymc
 import streamlit as st
 st.set_page_config(layout="wide")
 #from streamlit_extras.let_it_rain import rain
