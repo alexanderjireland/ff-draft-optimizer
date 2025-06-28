@@ -294,8 +294,48 @@ def setup_ray_and_load_model():
         index_dict = json.load(f)
     reverse_index_dict = {value: key for key, value in index_dict.items()}
     pm_test = pd.read_csv("bayesian_regression_model/pm_test_06_26.csv")
+    pm_test_2024 = pm_test[pm_test['season']==2024]
+    pm_test_cols = ['season', 'gsis_id', 'full_name_all_players', 'fantasy_pts',
+        'ff_pts_prev_year', 'years_exp', 'Rank', 'ESPN', 'AVG', 'position_rank',
+       'injury_prone', 'team_change', 'reception_prev_season',
+       'passing_yards_prev_season', 'pass_touchdown_prev_season',
+       'rush_touchdown_prev_season', 'interception_prev_season',
+       'fumble_lost_prev_season', 'rushing_yards_prev_season',
+       'two_pt_prev_season', 'receiving_yards_prev_season',
+       'receive_touchdown_prev_season', 'team_rank_prev_season',
+       'ff_pts_diff_prev_season', 'Rank_prev_season', 'ESPN_prev_season',
+       'AVG_prev_season', 'position_rank_prev_season',
+       'position_season_end_rank_prev_season', 'season_end_rank_prev_season',
+       'position_season_end_rank_diff_prev_season',
+       'season_end_rank_diff_prev_season', 'ESPN_reranked_prev_season',
+       'ADP_diff_prev_season', 'injury_count_num_weeks_prev_season',
+       'significant_injury_prev_season', 'cum_player_mean_prev_season',
+       'cum_player_std_prev_season', 'cum_player_min_prev_season',
+       'cum_player_noninjured_min_prev_season', 'cum_player_max_prev_season',
+       'position_QB', 'position_RB', 'position_TE', 'position_WR']
+    pm_test_cols_to_drop = ['Rank', 'ESPN', 'ff_pts_diff_prev_season', 'Rank_prev_season', 'ESPN_prev_season',
+       'AVG_prev_season', 'position_rank_prev_season',
+       'position_season_end_rank_prev_season', 'season_end_rank_prev_season',
+       'position_season_end_rank_diff_prev_season',
+       'season_end_rank_diff_prev_season', 'ESPN_reranked_prev_season',
+       'ADP_diff_prev_season', 'injury_count_num_weeks_prev_season',
+       'significant_injury_prev_season', 'cum_player_mean_prev_season',
+       'cum_player_std_prev_season', 'cum_player_min_prev_season',
+       'cum_player_noninjured_min_prev_season', 'cum_player_max_prev_season',
+       'position_QB', 'position_RB', 'position_TE', 'position_WR']
+    pm_test_cols_after_drop = [col_name for col_name in pm_test_cols if col_name not in pm_test_cols_to_drop]
+    pm_test_display_cols = ["Season", "ID", "Full Name", "Total Fantasy Points (2024)", "Total Fantasy Points (2023)", "Years of Experience", "AVG ADP", "Position Rank", 
+    "Injury Prone", "Team Change (2023-2024)", "Receptions (2023)", "Passing Yards (2023)", "Passing Touchdowns (2023)", "Rushing Touchdowns (2023)",
+    "Interceptions (2023)", "Fumbles (2023)", "Rushing Yards (2023)", "Two Point Conversions (2023)", "Receiving Yards (2023)", "Receiving Touchdowns (2023)",
+    "Team Fantasy Rank (2023)"]
+    pm_col_dict = dict(zip(pm_test_cols_after_drop, pm_test_display_cols))
+    pm_test_2024 = pm_test_2024[pm_test_cols_after_drop].rename(columns=pm_col_dict)
+
+    reordered_cols = ["Season", "ID", "Full Name", "Years of Experience", "Injury Prone", "Total Fantasy Points (2024)", "Total Fantasy Points (2023)", "AVG ADP", "Position Rank", 
+         "Passing Yards (2023)", "Passing Touchdowns (2023)", "Interceptions (2023)", "Fumbles (2023)", "Rushing Yards (2023)", "Rushing Touchdowns (2023)",
+         "Receptions (2023)", "Receiving Yards (2023)", "Receiving Touchdowns (2023)","Two Point Conversions (2023)", "Team Fantasy Rank (2023)", "Team Change (2023-2024)"]
     
-    return algo, policy, test_df_ref, X_test, y_test, index_dict, reverse_index_dict, trace_path, pm_test
+    return algo, policy, test_df_ref, X_test, y_test, index_dict, reverse_index_dict, trace_path, pm_test_2024
 
 
 #------------------------------------- Bayesian Regresion --------------------------------
@@ -631,6 +671,9 @@ if st.session_state.draft_started:
                     st.session_state.step += 1
                     st.rerun()
 
+    display_player_data = st.toggle(f"Display {st.session_state.current_player_name_for_plot} Data")
+    if display_player_data:
+        st.dataframe(st.session_state.pm_test[st.session_state.pm_test['ID']==st.session_state.current_player_id_for_plot], hide_index=True)
 
     if st.session_state.done:
         st.header("Draft Board")
