@@ -331,36 +331,52 @@ if 'current_player_ax' not in st.session_state:
     st.session_state.current_player_ax = None
 if 'current_player_id_for_plot' not in st.session_state:
     st.session_state.current_player_id_for_plot = None
+if 'current_posterior_pred_samples' not in st.session_state:
+    st.session_state.current_posterior_pred_samples = None
+if 'current_player_name_for_plot' not in st.session_state:
+    st.session_state.current_player_name_for_plot = None
 
-def predict_player(i, trace_path, X_test, y_test, index_dict, plot=False):
-
+def create_base_predict_player_plot(i, trace_path, X_test, index_dict):
     posterior_pred_samples = get_posterior_predictive_samples(i, trace_path, X_test)
     player_id = index_dict[str(i)]
     player_name = st.session_state.env.env.gsis_to_name.get(player_id)
- 
-    # Plot posterior predictive distribution
-    fig = plt.figure(figsize=(10, 6))
-    ax = fig.add_subplot(111)
 
-    projected_median = np.median(posterior_pred_samples)
-
+    fig, ax = plt.subplots(figsize=(10, 6))
     sns.histplot(posterior_pred_samples, bins=50, kde=True, color="skyblue", ax=ax)
+    
+    projected_median = np.median(posterior_pred_samples)
     ax.axvline(projected_median, color="red", linestyle="--", label=f"Median: {projected_median:.1f}")
+    
     ax.set_title(f"Posterior Predictive Distribution for {player_name}")
     ax.set_xlabel("Predicted Season Points")
     ax.axis(xmin=0, xmax=500, ymin=0, ymax=650)
     ax.set_ylabel("Density")
-
     ax.grid(True)
+    
+    return fig, ax, posterior_pred_samples, player_name
 
-    threshold = st.slider(f"Set Probability threshold for {player_name}", 0, 500, 200, step=5)
+@st.cache_data(show_spinner=False)
+def create_base_predict_player_plot_cached(i, trace_path, X_test, index_dict):
+    return create_base_predict_player_plot(i, trace_path, X_test, index_dict)
+
+def update_plot_with_slider_value(ax, posterior_pred_samples, threshold, player_name):
+    for line in ax.lines:
+        if line.get_color() == 'purple':
+            line.remove()
+    for text in ax.texts:
+        if text.get_color() == 'purple':
+            text.remove()
+
     prob_gtt = np.mean(posterior_pred_samples > threshold)
+    
     ax.axvline(threshold, color="purple", label=f"Probability Threshold: {threshold}")
-    ax.text(threshold+10, 550, f"Prob > {threshold}: {prob_gtt:.2%}", color="purple", verticalalignment="top", bbox=dict(boxstyle="round,pad=0.3", fc="yellow", ec="b", lw=1, alpha=0.5))
+    ax.text(threshold + 10, 550, f"Prob > {threshold}: {prob_gtt:.2%}", 
+            color="purple", verticalalignment="top", 
+            bbox=dict(boxstyle="round,pad=0.3", fc="yellow", ec="b", lw=1, alpha=0.5))
     
     ax.legend(loc="upper right")
 
-    return fig
+    return ax
 
 def color_position(val):
     if 'QB' in str(val):
@@ -421,7 +437,15 @@ with st.sidebar:
 if st.session_state.draft_started:
     if not st.session_state.env_initialized:
         if st.session_state.algo is None:
-            st.session_state.algo, st.session_state.policy, st.session_state.test_df_ref, st.session_state.X_test, st.session_state.y_test, st.session_state.index_dict, st.session_state.reverse_index_dict, st.session_state.trace_path, st.session_state.pm_test = setup_ray_and_load_model()
+            st.session_state.algo, \
+            st.session_state.policy, \
+            st.session_state.test_df_ref, \
+            st.session_state.X_test, \
+            st.session_state.y_test, \
+            st.session_state.index_dict, \
+            st.session_state.reverse_index_dict, \
+            st.session_state.trace_path, \
+            st.session_state.pm_test = setup_ray_and_load_model()
         
         env_config = {
             'player_df_ref': st.session_state.test_df_ref,
@@ -501,7 +525,6 @@ if st.session_state.draft_started:
                     else:
                         action_to_take = int(user_choice_str.split(":")[0].strip())
 
-                    
                     player_id = st.session_state.env.env._get_player_from_action(action_to_take)
                     player_name = st.session_state.env.env.gsis_to_name.get(player_id, "N/A")
                     st.success(f"You drafted {player_name}.")
@@ -509,6 +532,11 @@ if st.session_state.draft_started:
                                     
                     st.session_state.env.env.step(action_to_take)
                     st.session_state.step += 1
+
+                    st.session_state.current_player_fig = None
+                    st.session_state.current_player_ax = None
+                    st.session_state.current_player_id_for_plot = None
+
                     st.rerun()
 
     with col1:
@@ -526,25 +554,60 @@ if st.session_state.draft_started:
                 st.write("Current Observation:")
                 obs_df, ids = get_obs_df(flat_obs)
                 st.dataframe(obs_df)
+
                 ppdist_display = True
+                default_player_option = None
                 options = [f"{st.session_state.env.env.gsis_to_position.get(id)}: {st.session_state.env.env.gsis_to_name.get(id)}" for id in ids if id is not None]
                 try:
-                    default=options[model_action_index]
+                    default_player_option=options[model_action_index]
                 except:
                     try:
-                        default=options[0]
+                        default_player_option=options[0]
                     except:
                         ppdist_display = False
                 
-                if ppdist_display:
-                    player = st.segmented_control("Posterior Predictive Distributions", options, default=default)
-                    player_id = ids[options.index(player)]
-                    player_idx = st.session_state.reverse_index_dict.get(player_id)
-                    if player_idx is not None:
-                        fig = predict_player(player_idx, st.session_state.trace_path, st.session_state.X_test, st.session_state.y_test, st.session_state.index_dict)
-                        st.pyplot(fig)
-                    else:
-                        st.warning(f"Player index: Model suggestion '{player_idx}' not available.")
+                if ppdist_display and default_player_option:
+                    selected_player_display = st.segmented_control(
+                        "Posterior Predictive Distributions", 
+                        options, 
+                        default=default_player_option
+                    )
+                    if selected_player_display in options:
+                        player_id_to_plot = ids[options.index(selected_player_display)]
+                        player_idx_to_plot = st.session_state.reverse_index_dict.get(player_id_to_plot)
+
+                        if player_idx_to_plot is not None:
+                            if st.session_state.current_player_id_for_plot != player_id_to_plot:
+                                st.session_state.current_player_fig, \
+                                st.session_state.current_player_ax, \
+                                st.session_state.current_posterior_pred_samples, \
+                                st.session_state.current_player_name_for_plot = create_base_predict_player_plot(
+                                    player_idx_to_plot, 
+                                    st.session_state.trace_path, 
+                                    st.session_state.X_test, 
+                                    st.session_state.index_dict
+                                )
+                                st.session_state.current_player_id_for_plot = player_id_to_plot
+                            
+                            current_fig = st.session_state.current_player_fig
+                            current_ax = st.session_state.current_player_ax
+                            
+                            threshold = st.slider(
+                                f"Set Probability threshold for {st.session_state.current_player_name_for_plot}", 
+                                0, 500, 200, step=5,
+                                key=f"threshold_slider_{player_id_to_plot}_{st.session_state.step}" # Unique key for player/step
+                            )
+                            
+                            update_plot_with_slider_value(
+                                current_ax, 
+                                st.session_state.current_posterior_pred_samples, 
+                                threshold, 
+                                st.session_state.current_player_name_for_plot
+                            )
+                            
+                            st.pyplot(current_fig)
+                        else:
+                            st.warning(f"Player index: Model suggestion '{player_idx}' not available.")
 
             else:
                 st.subheader(f"{st.session_state.teams_dict.get(current_agent)}'s Turn (AI)")
