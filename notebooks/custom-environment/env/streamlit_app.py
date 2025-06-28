@@ -294,9 +294,8 @@ def setup_ray_and_load_model():
         index_dict = json.load(f)
     reverse_index_dict = {value: key for key, value in index_dict.items()}
     pm_test = pd.read_csv("bayesian_regression_model/pm_test_06_26.csv")
-    pm_test_2024 = pm_test[pm_test['season']==2024]
     
-    return algo, policy, test_df_ref, X_test, y_test, index_dict, reverse_index_dict, trace_path, pm_test_2024
+    return algo, policy, test_df_ref, X_test, y_test, index_dict, reverse_index_dict, trace_path, pm_test
 
 
 #------------------------------------- Bayesian Regresion --------------------------------
@@ -325,6 +324,13 @@ def get_posterior_predictive_samples(i, trace_path, X_test):
     # Take mean and std of the posterior predictive distribution to create samples
     posterior_pred_samples = np.random.normal(mu_samples, sigma_samples)
     return posterior_pred_samples
+
+if 'current_player_fig' not in st.session_state:
+    st.session_state.current_player_fig = None
+if 'current_player_ax' not in st.session_state:
+    st.session_state.current_player_ax = None
+if 'current_player_id_for_plot' not in st.session_state:
+    st.session_state.current_player_id_for_plot = None
 
 def predict_player(i, trace_path, X_test, y_test, index_dict, plot=False):
 
@@ -562,9 +568,6 @@ if st.session_state.draft_started:
                     st.session_state.step += 1
                     st.rerun()
 
-    show_pm_test = st.toggle("Show Player Data")
-    if show_pm_test:
-        st.dataframe(st.session_state.pm_test[st.session_state.pm_test['gsis_id']==player_id])
 
     if st.session_state.done:
         st.header("Draft Board")
