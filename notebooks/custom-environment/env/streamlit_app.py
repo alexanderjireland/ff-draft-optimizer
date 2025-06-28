@@ -431,7 +431,7 @@ def color_position(val):
         return ''
 #------------------------------------- Draft Loop -------------------------------------
 
-st.title("Fantasy Football Mock Draft")
+st.title("2024 Fantasy Football Mock Draft")
 
 if 'draft_started' not in st.session_state:
     st.session_state.draft_started = False
@@ -473,6 +473,7 @@ with st.sidebar:
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()
+    st.markdown("*Created by Alexander Ireland*      [Github](https://github.com/alexanderjireland/ff-draft-optimizer)          [LinkedIn](https://www.linkedin.com/in/alexanderjireland)")
 
 if st.session_state.draft_started:
     if not st.session_state.env_initialized:
