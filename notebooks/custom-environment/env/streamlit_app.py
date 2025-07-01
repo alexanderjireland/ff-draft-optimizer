@@ -648,7 +648,7 @@ if st.session_state.draft_started:
                             
                             st.pyplot(current_fig)
                         else:
-                            st.warning(f"Player index: Model suggestion '{player_idx}' not available.")
+                            st.warning(f"Player index: Model suggestion '{player_idx_to_plot}' not available.")
 
             else:
                 st.subheader(f"{st.session_state.teams_dict.get(current_agent)}'s Turn (AI)")
