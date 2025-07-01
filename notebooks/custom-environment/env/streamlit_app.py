@@ -4,7 +4,7 @@ st.set_page_config(layout="wide")
 import pandas as pd
 import time
 import numpy as np
-import pymc as pm
+#import pymc as pm
 import arviz as az
 import json
 import seaborn as sns
