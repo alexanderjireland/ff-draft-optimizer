@@ -215,7 +215,7 @@ def get_obs_df(obs_dict):
 
 
 @st.cache_resource
-def obtain_train_and_test_data(path='../../../data/player_projections/model_06_12_predictions_with_position_ranks.csv'):
+def obtain_train_and_test_data(path='data_for_streamlit/model_06_12_predictions_with_position_ranks.csv'):
     data_df = pd.read_csv(path)
     train_df = data_df[data_df['season']==2023]
     test_df = data_df[data_df['season']==2024]
