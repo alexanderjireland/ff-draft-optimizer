@@ -20,8 +20,8 @@ import gymnasium as spaces
 from ray.rllib.env.env_context import EnvContext
 from mock_draft_env import MockDraftEnvironment
 import sys
-sys.path.append("../../../src")
-import ff_projections
+#sys.path.append("../../../src")
+#import ff_projections
 
 
 class DraftEnvironmentWrapper(MultiAgentEnv):
