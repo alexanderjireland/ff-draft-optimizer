@@ -20,10 +20,12 @@ import gymnasium as spaces
 from ray.rllib.env.env_context import EnvContext
 from mock_draft_env import MockDraftEnvironment
 import sys
-import os
 #sys.path.append("../../../src")
 #import ff_projections
-dir_path = os.path.dirname(os.path.realpath(__file__))
+from pathlib import Path
+
+# Relative path to the data file
+csv_path = Path("streamlit_data") / "model_06_12_predictions_with_position_ranks.csv"
 
 
 class DraftEnvironmentWrapper(MultiAgentEnv):
@@ -217,7 +219,7 @@ def get_obs_df(obs_dict):
 
 
 @st.cache_resource
-def obtain_train_and_test_data(path=dir_path + '/model_06_12_predictions_with_position_ranks.csv'):
+def obtain_train_and_test_data(path=csv_path):
     data_df = pd.read_csv(path)
     train_df = data_df[data_df['season']==2023]
     test_df = data_df[data_df['season']==2024]
