@@ -26,13 +26,7 @@ import os
 import ray.util.multiprocessing
 
 if not ray.is_initialized():
-    try:
-        ray.util.multiprocessing.set_start_method("fork", force=True)
-        print("Set multiprocessing start method to 'fork'.")
-    except RuntimeError as e:
-        print(f"Could not set start method to 'fork': {e}")
-
-    ray.init(ignore_reinit_error=True, num_cpus=1, num_gpus=0, log_to_driver=True, object_store_memory=100_000_000)
+    ray.init(ignore_reinit_error=True, num_cpus=1, num_gpus=0, log_to_driver=True, object_store_memory=1_000_000_000)
 
 st.set_page_config(layout="wide")
 
