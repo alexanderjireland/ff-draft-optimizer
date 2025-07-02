@@ -30,6 +30,7 @@ csv_path = Path("notebooks/custom_environment/env/streamlit_data") / "model_06_1
 checkpoint_path = Path("notebooks/custom_environment/env/streamlit_data/final_checkpoint_20250627_015625")
 
 st.write("Current working directory:", os.getcwd())
+st.write("list dir", os.listdir())
 file_path = Path("streamlit_data/model_06_12_predictions_with_position_ranks.csv")
 st.write("Resolved path:", file_path.resolve())
 st.write("Exists?", file_path.exists())
