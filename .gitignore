@@ -1,5 +1,5 @@
 # leaving data out of git
-
+data/
 models/fantasy_rl_checkpoints/
 notebooks/custom-environment/env/environment.yml
 tree.txt
