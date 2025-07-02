@@ -27,15 +27,6 @@ import os
 
 # Relative path to the data file
 csv_path = Path("streamlit_data") / "model_06_12_predictions_with_position_ranks.csv"
-checkpoint_path = Path("streamlit_data/final_checkpoint_20250627_015625")
-
-st.write("Current working directory:", os.getcwd())
-st.write("list dir", os.listdir())
-file_path = Path("streamlit_data/model_06_12_predictions_with_position_ranks.csv")
-st.write("Resolved path:", file_path.resolve())
-st.write("Exists?", file_path.exists())
-st.write("checkpoint path", checkpoint_path.resolve())
-st.write("Exists?", checkpoint_path.exists())
 
 class DraftEnvironmentWrapper(MultiAgentEnv):
     def __init__(self, config):
@@ -224,6 +215,7 @@ def get_obs_df(obs_dict):
     new_obs_index = ["player", "projected_pts", "difference_with_replacement", "hurt_score", "difference_with_current_worst_starter", "action_mask", "pos_available", "team_needs", "next_opponent_needs"]
     obs_df_transpose = obs_df.T
     new_obs_df_transpose = obs_df_transpose.loc[new_obs_index]
+    new_obs_df_transpose = new_obs_df_transpose.astype(str)
     return new_obs_df_transpose, player_ids
 
 
