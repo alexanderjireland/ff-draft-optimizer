@@ -286,8 +286,8 @@ def setup_ray_and_load_model():
     )
     
     algo = config.build()
-    checkpoint_path = "streamlit_data/fantasy_rl_checkpoints/final_checkpoint_20250627_015625"
-    algo.restore(checkpoint_path)
+    checkpoint_path = Path("streamlit_data/final_checkpoint_20250627_015625").resolve()
+    algo.restore(str(checkpoint_path))
     policy = algo.get_policy("shared_policy")
 
     #trace = az.from_netcdf("bayesian_regression_model/full_send_model_06_03.nc")
