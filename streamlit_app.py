@@ -241,6 +241,7 @@ def flatten_obs_dict(obs_dict):
 
 @st.cache_resource
 def setup_ray_and_load_model():
+    ray.shutdown()
     if not ray.is_initialized():
         ray.init(ignore_reinit_error=True, num_cpus=1, num_gpus=0, log_to_driver=True)
 
