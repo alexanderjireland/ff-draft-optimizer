@@ -25,9 +25,6 @@ from pathlib import Path
 import os
 import ray.util.multiprocessing
 
-if not ray.is_initialized():
-    ray.init(ignore_reinit_error=True, num_cpus=1, num_gpus=0, log_to_driver=True, object_store_memory=1_000_000_000)
-
 st.set_page_config(layout="wide")
 
 # Relative path to the data file
@@ -246,6 +243,9 @@ def flatten_obs_dict(obs_dict):
 
 @st.cache_resource
 def setup_ray_and_load_model():
+    if not ray.is_initialized():
+        ray.init(ignore_reinit_error=True, num_cpus=1, num_gpus=0, log_to_driver=True, object_store_memory=1_000_000_000)
+
     train_df, test_df = obtain_train_and_test_data()
     df_ref = ray.put(train_df)
     test_df_ref = ray.put(test_df)
