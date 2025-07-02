@@ -27,6 +27,12 @@ from pathlib import Path
 # Relative path to the data file
 csv_path = Path("streamlit_data") / "model_06_12_predictions_with_position_ranks.csv"
 
+import os
+st.write("Current working directory:", os.getcwd())
+file_path = Path("streamlit_data/model_06_12_predictions_with_position_ranks.csv")
+st.write("Resolved path:", file_path.resolve())
+st.write("Exists?", file_path.exists())
+
 
 class DraftEnvironmentWrapper(MultiAgentEnv):
     def __init__(self, config):
