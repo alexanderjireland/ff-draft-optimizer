@@ -286,7 +286,7 @@ def setup_ray_and_load_model():
     )
     
     algo = config.build()
-    checkpoint_path = r"C:\Users\irela\Documents\NSS_Projects\ff-draft-optimizer\models\fantasy_rl_checkpoints\final_checkpoint_20250627_015625"
+    checkpoint_path = "streamlit_data/fantasy_rl_checkpoints/final_checkpoint_20250627_015625"
     algo.restore(checkpoint_path)
     policy = algo.get_policy("shared_policy")
 
