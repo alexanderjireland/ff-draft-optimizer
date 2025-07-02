@@ -27,6 +27,14 @@ import os
 
 # Relative path to the data file
 csv_path = Path("streamlit_data") / "model_06_12_predictions_with_position_ranks.csv"
+checkpoint_path = Path("streamlit_data/final_checkpoint_20250627_015625")
+
+st.write("Current working directory:", os.getcwd())
+file_path = Path("streamlit_data/model_06_12_predictions_with_position_ranks.csv")
+st.write("Resolved path:", file_path.resolve())
+st.write("Exists?", file_path.exists())
+st.write("checkpoint path", checkpoint_path.resolve())
+st.write("Exists?", checkpoint_path.exists())
 
 class DraftEnvironmentWrapper(MultiAgentEnv):
     def __init__(self, config):
