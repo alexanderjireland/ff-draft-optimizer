@@ -26,12 +26,7 @@ from pathlib import Path
 import os
 
 if not ray.is_initialized():
-    ray.init(ignore_reinit_error=True, 
-                num_cpus=1, 
-                num_gpus=0 
-                log_to_driver=True,
-                object_store_memory=100_000_000,
-                )
+    ray.init(ignore_reinit_error=True, num_cpus=1, num_gpus=0, log_to_driver=True, object_store_memory=100_000_000)
 
 # Relative path to the data file
 csv_path = Path("streamlit_data") / "model_06_12_predictions_with_position_ranks.csv"
