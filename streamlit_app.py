@@ -1,5 +1,4 @@
 import streamlit as st
-st.set_page_config(layout="wide")
 #from streamlit_extras.let_it_rain import rain
 import pandas as pd
 import time
@@ -24,9 +23,18 @@ import sys
 #import ff_projections
 from pathlib import Path
 import os
+import ray.util.multiprocessing
 
 if not ray.is_initialized():
+    try:
+        ray.util.multiprocessing.set_start_method("fork", force=True)
+        print("Set multiprocessing start method to 'fork'.")
+    except RuntimeError as e:
+        print(f"Could not set start method to 'fork': {e}")
+
     ray.init(ignore_reinit_error=True, num_cpus=1, num_gpus=0, log_to_driver=True, object_store_memory=100_000_000)
+
+st.set_page_config(layout="wide")
 
 # Relative path to the data file
 csv_path = Path("streamlit_data") / "model_06_12_predictions_with_position_ranks.csv"
