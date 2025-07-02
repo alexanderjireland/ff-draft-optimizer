@@ -243,7 +243,12 @@ def flatten_obs_dict(obs_dict):
 def setup_ray_and_load_model():
     ray.shutdown()
     if not ray.is_initialized():
-        ray.init(ignore_reinit_error=True, num_cpus=1, num_gpus=0, log_to_driver=True)
+        ray.init(ignore_reinit_error=True, 
+                 num_cpus=1, 
+                 num_gpus=0, 
+                 log_to_driver=True,
+                 object_store_memory=100_000_000,
+                 )
 
     train_df, test_df = obtain_train_and_test_data()
     df_ref = ray.put(train_df)
