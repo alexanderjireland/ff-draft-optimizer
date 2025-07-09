@@ -207,7 +207,8 @@ def get_obs_df(obs_dict):
     unflattened_dict = get_unflattened_obs(obs_dict)
     index = st.session_state.env.env.draftable_positions
     obs_df = pd.DataFrame(unflattened_dict, index=index)
-    
+    obs_df = obs_df.astype(float).round(1)
+
     player_names = []
     player_ids = []
     for i in range(4):
