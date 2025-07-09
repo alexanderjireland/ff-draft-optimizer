@@ -712,9 +712,9 @@ if st.session_state.draft_started:
         with st.expander("Final Rewards"):
             for agent, reward in st.session_state.env.env.rewards.items():
                 if agent == st.session_state.human_agent_name:
-                    st.metric(label=f"**Your Team** ({st.session_state.teams_dict.get(agent)}) Final Reward", value = f"{reward:.2f}")
+                    st.metric(label=f"**Your Team** ({st.session_state.teams_dict.get(agent)}) Final Reward", value = f"{reward:.1f}")
                 else:
-                    st.metric(label=f"{st.session_state.teams_dict.get(agent)} Final Reward", value = f"{reward:.2f}")
+                    st.metric(label=f"{st.session_state.teams_dict.get(agent)} Final Reward", value = f"{reward:.1f}")
 
         def display_final_results():
             if agent == st.session_state.human_agent_name:
@@ -725,15 +725,18 @@ if st.session_state.draft_started:
             roster_df = st.session_state.env.env.full_roster_df[st.session_state.env.env.full_roster_df['agent'] == agent].copy()
             roster_df['projected_pts'] = roster_df['gsis_id'].map(st.session_state.env.env.gsis_to_projections)
 
+            def get_presentable_df(df):
+                return df[['position', 'player_name', 'projected_pts', 'fantasy_pts']].sort_values('projected_pts', ascending=False).rename(columns=st.session_state.map_col_names).round({'Projected Points': 1, 'Total Fantasy Points (2024)':1})
+
             st.write("Full Roster:")
-            st.dataframe(roster_df[['position', 'player_name', 'projected_pts', 'fantasy_pts']].sort_values('projected_pts', ascending=False).rename(columns=st.session_state.map_col_names), hide_index=True)
+            st.dataframe(get_presentable_df(roster_df), hide_index=True)
 
             optimized_roster_df = st.session_state.env.env._get_optimized_lineup(roster_df)
             st.write("Optimized Starting Lineup:")
             if optimized_roster_df is not None: # Figure out how to handle small player pool
-                st.dataframe(optimized_roster_df[['position', 'player_name', 'projected_pts', 'fantasy_pts']].sort_values('projected_pts', ascending=False).rename(columns=st.session_state.map_col_names), hide_index=True)
-                st.metric(label="Total Projected Points (Starters)", value=f"{optimized_roster_df['projected_pts'].sum():.2f}")
-                st.metric(label="Total Fantasy Points (Starters)", value=f"{optimized_roster_df['fantasy_pts'].sum():.2f}")
+                st.dataframe(get_presentable_df(optimized_roster_df), hide_index=True)
+                st.metric(label="Total Projected Points (Starters)", value=f"{optimized_roster_df['projected_pts'].sum():.1f}")
+                st.metric(label="Total Fantasy Points (Starters)", value=f"{optimized_roster_df['fantasy_pts'].sum():.1f}")
                 st.divider()
 
         if st.session_state.NUM_TEAMS < 3:
