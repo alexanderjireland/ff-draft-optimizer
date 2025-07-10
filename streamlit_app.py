@@ -451,6 +451,8 @@ if 'policy' not in st.session_state:
     st.session_state.policy = None
 if 'test_df_ref' not in st.session_state:
     st.session_state.test_df_ref = None
+if 'autodraft' not in st.session_state:
+    st.session_state.autodraft = None
 
 with st.sidebar:
     if "done" in st.session_state and not st.session_state.done:
@@ -546,7 +548,7 @@ if st.session_state.draft_started:
                 roster[key] = [st.session_state.env.env.gsis_to_name.get(player, 'None') for player in value]
             roster_dict = {key: ", ".join(value) for key, value in roster.items()}
             st.dataframe({"Roster":roster_dict})
-            if current_agent == st.session_state.human_agent_name:
+            if current_agent == st.session_state.human_agent_name and not st.session_state.autodraft:
                 obs = st.session_state.env.env.observe(current_agent)
                 flat_obs = flatten_obs_dict(obs)
                 model_action_index = st.session_state.policy.compute_single_action(flat_obs, explore=False)[0]
@@ -566,27 +568,32 @@ if st.session_state.draft_started:
                     ["Model Suggestion"] + options,
                     key=f"user_input_{st.session_state.step}"
                 )
+                
+                subcol1, subcol2 = st.columns(2)
+                with subcol1:
+                    if st.button("Confirm Pick", key=f"confirm_button_{st.session_state.step}"):
+                        action_to_take = None
+                        if user_choice_str == "Model Suggestion":
+                            action_to_take = model_action_index
+                        else:
+                            action_to_take = int(user_choice_str.split(":")[0].strip())
 
-                if st.button("Confirm Pick", key=f"confirm_button_{st.session_state.step}"):
-                    action_to_take = None
-                    if user_choice_str == "Model Suggestion":
-                        action_to_take = model_action_index
-                    else:
-                        action_to_take = int(user_choice_str.split(":")[0].strip())
+                        player_id = st.session_state.env.env._get_player_from_action(action_to_take)
+                        player_name = st.session_state.env.env.gsis_to_name.get(player_id, "N/A")
+                        st.success(f"You drafted {player_name}.")
 
-                    player_id = st.session_state.env.env._get_player_from_action(action_to_take)
-                    player_name = st.session_state.env.env.gsis_to_name.get(player_id, "N/A")
-                    st.success(f"You drafted {player_name}.")
+                                        
+                        st.session_state.env.env.step(action_to_take)
+                        st.session_state.step += 1
 
-                                    
-                    st.session_state.env.env.step(action_to_take)
-                    st.session_state.step += 1
+                        st.session_state.current_player_fig = None
+                        st.session_state.current_player_ax = None
+                        st.session_state.current_player_id_for_plot = None
 
-                    st.session_state.current_player_fig = None
-                    st.session_state.current_player_ax = None
-                    st.session_state.current_player_id_for_plot = None
-
-                    st.rerun()
+                        st.rerun()
+                with subcol2:
+                    if st.button("Autodraft to End"):
+                        st.session_state.autodraft = True
 
     with col1:
         if st.session_state.env.env.current_pick >= st.session_state.env.env.total_picks:
@@ -594,7 +601,7 @@ if st.session_state.draft_started:
 
         if not st.session_state.done:
 
-            if current_agent == st.session_state.human_agent_name:
+            if current_agent == st.session_state.human_agent_name and not st.session_state.autodraft:
                 st.subheader(f"Your Turn ({st.session_state.teams_dict.get(current_agent)})")
 
                 obs = st.session_state.env.env.observe(current_agent)
