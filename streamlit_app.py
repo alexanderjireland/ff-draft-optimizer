@@ -289,6 +289,7 @@ def setup_ray_and_load_model():
         .debugging(log_level="ERROR")
     )
     
+    # obtain policy
     algo = config.build()
     checkpoint_path = Path("streamlit_data/final_checkpoint_20250627_015625").resolve()
     algo.restore(str(checkpoint_path))
@@ -303,6 +304,8 @@ def setup_ray_and_load_model():
     reverse_index_dict = {value: key for key, value in index_dict.items()}
     pm_test = pd.read_csv("bayesian_regression_model/pm_test_06_26.csv")
     pm_test_2024 = pm_test[pm_test['season']==2024]
+
+    # reorganizing and renaming columns for display
     pm_test_cols = ['season', 'gsis_id', 'full_name_all_players', 'fantasy_pts',
         'ff_pts_prev_year', 'years_exp', 'Rank', 'ESPN', 'AVG', 'position_rank',
        'injury_prone', 'team_change', 'reception_prev_season',
