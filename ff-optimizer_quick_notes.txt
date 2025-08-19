@@ -4,16 +4,14 @@ Get to do list going!
 
 Add .pkl file data collection nb from midcourse project to this repository?
 
+-Utilize team depth charts to improve player projections.
+
 Could incorporate probability a player gets injured into Bayesian regression model. (Hurdle model??)
 
--PPO on Google Colab
-	-Capture metadata (how many times invalid picks were made, rewards, rosters, times when agent chose pick that they already had but hurt other player, etc.)
-	-Reward at end difference between best (or next best if best) overall team score
 	-Consider a hybrid end reward strategy that combines real and sampled from posterior scores
-	-How to save model and test
-	-Implement model suggestions to a streamlit app
 
--Streamlit App
--Organize Code and Directory
--Update README
+-Develop test to detect times when model chose player to hurt others (i.e. chose not best available because they were not a team need for opponent OR chose position that wasn't a need for team but hurt opponent) (record rosters, four player options, current needs and/or hurt scores)
 
+-Reorganize Code and Directory
+
+-Expand to more than 2 agents
