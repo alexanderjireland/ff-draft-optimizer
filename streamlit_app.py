@@ -1,9 +1,7 @@
 import streamlit as st
-#from streamlit_extras.let_it_rain import rain
 import pandas as pd
 import time
 import numpy as np
-#import pymc as pm
 import arviz as az
 import json
 import seaborn as sns
@@ -19,11 +17,10 @@ import gymnasium as spaces
 from ray.rllib.env.env_context import EnvContext
 from mock_draft_env import MockDraftEnvironment
 import sys
-#sys.path.append("../../../src")
-#import ff_projections
 from pathlib import Path
 import os
 import ray.util.multiprocessing
+import traceback
 
 st.set_page_config(layout="wide")
 
@@ -91,7 +88,6 @@ class DraftEnvironmentWrapper(MultiAgentEnv):
 
         except Exception as e:
             print(f"Exception in reset: {e}")
-            import traceback
             traceback.print_exc()
             raise
 
@@ -584,7 +580,6 @@ if st.session_state.draft_started:
                         player_id = st.session_state.env.env._get_player_from_action(action_to_take)
                         player_name = st.session_state.env.env.gsis_to_name.get(player_id, "N/A")
                         st.success(f"You drafted {player_name}.")
-
                                         
                         st.session_state.env.env.step(action_to_take)
                         st.session_state.step += 1
@@ -764,7 +759,7 @@ if st.session_state.draft_started:
                 if i % 3 == 0:
                     with fin_col1:
                         display_final_results()
-                elif i % 3 ==1:
+                elif i % 3 == 1:
                     with fin_col2:
                         display_final_results()
                 else:
